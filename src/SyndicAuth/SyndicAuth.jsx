@@ -33,6 +33,9 @@ export function SyndicAuth({ onSuccess, onBack = null }) {
       const { data, error: authErr } = await supabase.auth.signInWithPassword({
         email: email.trim(),
         password,
+        options: {
+          redirectTo: `${window.location.origin}`, // Redirection après connexion
+        },
       });
       if (authErr) {
         setError("Email ou mot de passe incorrect");
