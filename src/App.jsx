@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
 import { Shield, Vote } from "lucide-react";
 import { useDomain } from "./hooks/useDomain";
@@ -17,151 +18,192 @@ const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY";
 export const supabase = createClient(supabaseUrl, supabaseKey);
 
 // ============================================================
-// APP ROOT
+// UTILITAIRES
 // ============================================================
-export default function App() {
-  const { isSyndic, isCopro } = useDomain();
-  const [view, setView] = useState({ page: "loading" });
+function PageLoader() {
+  return (
+    <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
+      <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
+    </div>
+  );
+}
 
-  const navigate = (page, params = {}) => setView({ page, ...params });
+async function getSyndicFromSession() {
+  const { data: { session } } = await supabase.auth.getSession();
+  if (!session) return null;
+  const { data } = await supabase.from("syndics").select("*").eq("id", session.user.id).single();
+  return data || null;
+}
 
-  // Vérifier la session syndic au démarrage (uniquement côté syndic)
+// ============================================================
+// ROUTES SYNDIC
+// ============================================================
+
+function SyndicAuthPage() {
+  const [ready, setReady] = useState(false);
+  const navigate = useNavigate();
+
   useEffect(() => {
-    if (!isSyndic) {
-      setView({ page: "ready" });
-      return;
-    }
-    const checkAuth = async () => {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (session) {
-        const { data: syndic } = await supabase
-          .from("syndics")
-          .select("*")
-          .eq("id", session.user.id)
-          .single();
-        if (syndic) {
-          setView({ page: "syndic-dashboard", syndic });
-          return;
-        }
-      }
-      setView({ page: "ready" });
+    getSyndicFromSession().then((syndic) => {
+      if (syndic) navigate("/dashboard", { replace: true });
+      else setReady(true);
+    });
+  }, [navigate]);
+
+  if (!ready) return <PageLoader />;
+  return <SyndicAuth onSuccess={() => navigate("/dashboard")} />;
+}
+
+function SyndicDashboardPage() {
+  const [syndic, setSyndic] = useState(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    getSyndicFromSession().then((s) => {
+      if (!s) navigate("/", { replace: true });
+      else setSyndic(s);
+    });
+  }, [navigate]);
+
+  if (!syndic) return <PageLoader />;
+  return (
+    <SyndicDashboard
+      syndic={syndic}
+      onSelectCopropriete={(cp) => navigate(`/copropriete/${cp.id}`)}
+      onLogout={async () => {
+        await supabase.auth.signOut();
+        navigate("/", { replace: true });
+      }}
+    />
+  );
+}
+
+function CoproprieteSettingsPage() {
+  const { id } = useParams();
+  const [syndic, setSyndic] = useState(null);
+  const [copropriete, setCopropriete] = useState(null);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const load = async () => {
+      const s = await getSyndicFromSession();
+      if (!s) { navigate("/", { replace: true }); return; }
+      const { data: cp } = await supabase.from("coproprietes").select("*").eq("id", id).single();
+      if (!cp) { navigate("/dashboard", { replace: true }); return; }
+      setSyndic(s);
+      setCopropriete(cp);
     };
-    checkAuth();
-  }, [isSyndic]);
+    load();
+  }, [id, navigate]);
 
-  // ---- Spinner de chargement initial ----
-  if (view.page === "loading") {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-[var(--bg)]">
-        <div className="w-8 h-8 border-2 border-emerald-500 border-t-transparent rounded-full animate-spin" />
-      </div>
-    );
-  }
+  if (!syndic || !copropriete) return <PageLoader />;
+  return (
+    <CoproprieteSettings
+      syndic={syndic}
+      copropriete={copropriete}
+      onOpenAG={(ag) => navigate(`/ag/${ag.id}`)}
+      onBack={() => navigate("/dashboard")}
+    />
+  );
+}
 
-  // ============================================================
-  // VUE SYNDIC (domaine syndic.*)
-  // ============================================================
-  if (isSyndic) {
-    // Auth / inscription
-    if (view.page === "ready") {
-      return (
-        <SyndicAuth
-          onSuccess={(syndic) => navigate("syndic-dashboard", { syndic })}
-        />
-      );
-    }
+function AdminViewPage() {
+  const { id } = useParams();
+  const [copropriete, setCopropriete] = useState(null);
+  const [agSession, setAgSession] = useState(null);
+  const navigate = useNavigate();
 
-    if (view.page === "syndic-dashboard") {
-      return (
-        <SyndicDashboard
-          syndic={view.syndic}
-          onSelectCopropriete={(cp) =>
-            navigate("copropriete", { syndic: view.syndic, copropriete: cp })
-          }
-          onLogout={async () => {
-            await supabase.auth.signOut();
-            navigate("ready");
-          }}
-        />
-      );
-    }
+  useEffect(() => {
+    const load = async () => {
+      const s = await getSyndicFromSession();
+      if (!s) { navigate("/", { replace: true }); return; }
+      const { data: ag } = await supabase
+        .from("ag_sessions")
+        .select("*, coproprietes(*)")
+        .eq("id", id)
+        .single();
+      if (!ag) { navigate("/dashboard", { replace: true }); return; }
+      setAgSession(ag);
+      setCopropriete(ag.coproprietes);
+    };
+    load();
+  }, [id, navigate]);
 
-    if (view.page === "copropriete") {
-      return (
-        <CoproprieteSettings
-          syndic={view.syndic}
-          copropriete={view.copropriete}
-          onOpenAG={(ag) =>
-            navigate("ag", {
-              syndic: view.syndic,
-              copropriete: view.copropriete,
-              agSession: ag,
-            })
-          }
-          onBack={() => navigate("syndic-dashboard", { syndic: view.syndic })}
-        />
-      );
-    }
+  if (!agSession || !copropriete) return <PageLoader />;
+  return (
+    <AdminView
+      copropriete={copropriete}
+      agSession={agSession}
+      onBack={() => navigate(`/copropriete/${copropriete.id}`)}
+      onEndAG={() => navigate(`/copropriete/${copropriete.id}`)}
+    />
+  );
+}
 
-    if (view.page === "ag") {
-      return (
-        <AdminView
-          copropriete={view.copropriete}
-          agSession={view.agSession}
-          onBack={() =>
-            navigate("copropriete", {
-              syndic: view.syndic,
-              copropriete: view.copropriete,
-            })
-          }
-          onEndAG={() =>
-            navigate("copropriete", {
-              syndic: view.syndic,
-              copropriete: view.copropriete,
-            })
-          }
-        />
-      );
-    }
-  }
+// ============================================================
+// ROUTES COPROPRIÉTAIRE
+// ============================================================
 
-  // ============================================================
-  // VUE COPROPRIÉTAIRE (domaine copro.*)
-  // ============================================================
-  if (isCopro) {
-    if (view.page === "ready" || view.page === "copro-login") {
-      return (
-        <CoproLogin
-          onLogin={(profile, agSession) =>
-            navigate("copro-vote", { coproProfile: profile, agSession })
-          }
-        />
-      );
-    }
+function CoproRootPage() {
+  const [ready, setReady] = useState(false);
+  const navigate = useNavigate();
 
-    if (view.page === "copro-vote") {
-      return (
-        <CoproVoteView
-          profile={view.coproProfile}
-          agSession={view.agSession}
-          onLogout={async () => {
-            if (view.coproProfile) {
-              await supabase
-                .from("coproprietaires")
-                .update({ presence: false })
-                .eq("id", view.coproProfile.id);
-            }
-            localStorage.removeItem("copro_profile");
-            navigate("ready");
-          }}
-        />
-      );
-    }
-  }
+  useEffect(() => {
+    const stored = localStorage.getItem("copro_profile");
+    if (stored) navigate("/vote", { replace: true });
+    else setReady(true);
+  }, [navigate]);
 
-  // ============================================================
-  // PAGE PAR DÉFAUT (ni syndic.* ni copro.*)
-  // ============================================================
+  if (!ready) return <PageLoader />;
+  return <CoproLogin onLogin={() => navigate("/vote")} />;
+}
+
+function CoproVotePage() {
+  const [profile, setProfile] = useState(null);
+  const [agSession, setAgSession] = useState(null);
+  const [ready, setReady] = useState(false);
+  const navigate = useNavigate();
+
+  useEffect(() => {
+    const load = async () => {
+      const stored = localStorage.getItem("copro_profile");
+      if (!stored) { navigate("/", { replace: true }); return; }
+      const p = JSON.parse(stored);
+      setProfile(p);
+      if (p.copropriete_id) {
+        const { data: ag } = await supabase
+          .from("ag_sessions")
+          .select("*")
+          .eq("copropriete_id", p.copropriete_id)
+          .eq("statut", "en_cours")
+          .single();
+        setAgSession(ag || null);
+      }
+      setReady(true);
+    };
+    load();
+  }, [navigate]);
+
+  if (!ready) return <PageLoader />;
+  return (
+    <CoproVoteView
+      profile={profile}
+      agSession={agSession}
+      onLogout={async () => {
+        if (profile) {
+          await supabase.from("coproprietaires").update({ presence: false }).eq("id", profile.id);
+        }
+        localStorage.removeItem("copro_profile");
+        navigate("/", { replace: true });
+      }}
+    />
+  );
+}
+
+// ============================================================
+// PAGE PAR DÉFAUT (ni syndic.* ni copro.*)
+// ============================================================
+function GuestPage() {
   return (
     <div className="min-h-screen bg-[var(--bg)] flex flex-col items-center justify-center p-6 space-y-8">
       <div className="text-center space-y-3">
@@ -188,5 +230,38 @@ export default function App() {
         </a>
       </div>
     </div>
+  );
+}
+
+// ============================================================
+// APP ROOT
+// ============================================================
+export default function App() {
+  const { isSyndic, isCopro } = useDomain();
+
+  return (
+    <BrowserRouter>
+      <Routes>
+        {isSyndic && (
+          <>
+            <Route path="/" element={<SyndicAuthPage />} />
+            <Route path="/dashboard" element={<SyndicDashboardPage />} />
+            <Route path="/copropriete/:id" element={<CoproprieteSettingsPage />} />
+            <Route path="/ag/:id" element={<AdminViewPage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </>
+        )}
+        {isCopro && (
+          <>
+            <Route path="/" element={<CoproRootPage />} />
+            <Route path="/vote" element={<CoproVotePage />} />
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </>
+        )}
+        {!isSyndic && !isCopro && (
+          <Route path="*" element={<GuestPage />} />
+        )}
+      </Routes>
+    </BrowserRouter>
   );
 }

@@ -2,7 +2,7 @@
 // VUE COPROPRIÉTAIRE : Vote
 // ============================================================
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, MinusCircle, LogOut, Vote, Check } from "lucide-react";
 import { supabase } from "../App";
 import { useRealtime } from "../hooks/useRealtime";
@@ -16,7 +16,7 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   const [voting, setVoting] = useState(null);
   const [justVoted, setJustVoted] = useState(null);
 
-  const fetchData = useCallback(async () => {
+  const fetchData = async () => {
     // Filtre par ag_session_id si on a une session active
     const resolsQuery = supabase
       .from("resolutions")
@@ -43,34 +43,44 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
     setResolutions(resols || []);
     setVotes(myVotes || []);
     setTotalTantiemes((copros || []).reduce((s, c) => s + (c.tantiemes || 0), 0));
-  }, [profile.id, profile.copropriete_id, agSession?.id]);
+  };
 
   useEffect(() => {
     fetchData();
-  }, [fetchData]);
+  }, []);
+
+  // Realtime : surveiller les votes du copropriétaire courant
+  useRealtime("votes", (payload) => {
+    if (
+      payload.new?.coproprietaire_id !== profile.id &&
+      payload.old?.coproprietaire_id !== profile.id
+    ) return;
+    setVotes((prev) => {
+      if (payload.eventType === "INSERT") return [...prev, payload.new];
+      if (payload.eventType === "UPDATE")
+        return prev.map((v) => (v.id === payload.new.id ? payload.new : v));
+      if (payload.eventType === "DELETE")
+        return prev.filter((v) => v.id !== payload.old.id);
+      return prev;
+    });
+  });
 
   // Realtime : surveiller les résolutions de cette AG
-  useRealtime(
-    "resolutions",
-    useCallback(
-      (payload) => {
-        setResolutions((prev) => {
-          const isForThisAG =
-            !agSession?.id || payload.new?.ag_session_id === agSession.id;
+  useRealtime("resolutions", (payload) => {
+    setResolutions((prev) => {
+      const isForThisAG =
+        !agSession?.id || payload.new?.ag_session_id === agSession.id;
 
-          if (payload.new?.statut === "en_cours" && isForThisAG) {
-            const exists = prev.find((r) => r.id === payload.new.id);
-            if (exists) return prev.map((r) => (r.id === payload.new.id ? payload.new : r));
-            return [...prev, payload.new];
-          }
-          return prev.filter(
-            (r) => r.id !== payload.new?.id && r.id !== payload.old?.id
-          );
-        });
-      },
-      [agSession?.id]
-    )
-  );
+      if (payload.new?.statut === "en_cours" && isForThisAG) {
+        const exists = prev.find((r) => r.id === payload.new.id);
+        if (exists) return prev.map((r) => (r.id === payload.new.id ? payload.new : r));
+        return [...prev, payload.new];
+      }
+      return prev.filter(
+        (r) => r.id !== payload.new?.id && r.id !== payload.old?.id
+      );
+    });
+  });
 
   const handleVote = async (resolutionId, choix) => {
     setVoting(resolutionId);

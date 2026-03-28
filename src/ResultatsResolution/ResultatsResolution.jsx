@@ -2,10 +2,23 @@
 // ============================================================
 // COMPOSANT ADMIN : Résultats d'une résolution
 // ============================================================
+import { useState } from "react";
 import { formatTantiemes } from "../hooks/formatTantieme.js";
 import { calcPourcentage } from "../hooks/calcPourcentage.js";
+import { useRealtime } from "../hooks/useRealtime.js";
 
-export function ResultatsResolution({ resolution, votes }) {
+export function ResultatsResolution({ resolution, votes: initialVotes }) {
+  const [votes, setVotes] = useState(initialVotes);
+
+  useRealtime("votes", ({ eventType, new: newRow, old: oldRow }) => {
+    setVotes((prev) => {
+      if (eventType === "INSERT") return [...prev, newRow];
+      if (eventType === "UPDATE") return prev.map((v) => (v.id === newRow.id ? newRow : v));
+      if (eventType === "DELETE") return prev.filter((v) => v.id !== oldRow.id);
+      return prev;
+    });
+  });
+
   const votesResolution = votes.filter((v) => v.resolution_id === resolution.id);
   const pour = votesResolution.filter((v) => v.choix === "pour");
   const contre = votesResolution.filter((v) => v.choix === "contre");

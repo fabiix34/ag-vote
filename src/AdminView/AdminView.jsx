@@ -2,7 +2,7 @@
 // VUE AG — Gestion d'une Assemblée Générale
 // ============================================================
 
-import { useState, useCallback, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import {
   BarChart3,
   Users,
@@ -59,22 +59,42 @@ export function AdminView({ copropriete, agSession, onBack, onEndAG }) {
     fetchAll();
   }, [fetchAll]);
 
-  // Realtime subscriptions
-  useRealtime("coproprietaires", fetchAll);
-  useRealtime("resolutions", fetchAll);
-  useRealtime(
-    "votes",
-    useCallback((payload) => {
-      setVotes((prev) => {
-        if (payload.eventType === "INSERT") return [...prev, payload.new];
-        if (payload.eventType === "UPDATE")
-          return prev.map((v) => (v.id === payload.new.id ? payload.new : v));
-        if (payload.eventType === "DELETE")
-          return prev.filter((v) => v.id !== payload.old.id);
-        return prev;
-      });
-    }, [])
-  );
+  // Realtime subscriptions — mises à jour ciblées sans refetch global
+
+  useRealtime("votes", (payload) => {
+    setVotes((prev) => {
+      if (payload.eventType === "INSERT") return [...prev, payload.new];
+      if (payload.eventType === "UPDATE")
+        return prev.map((v) => (v.id === payload.new.id ? payload.new : v));
+      if (payload.eventType === "DELETE")
+        return prev.filter((v) => v.id !== payload.old.id);
+      return prev;
+    });
+  }, { onStatusChange: setConnected });
+
+  useRealtime("resolutions", (payload) => {
+    if (payload.eventType !== "DELETE" && payload.new?.ag_session_id !== agSession.id) return;
+    setResolutions((prev) => {
+      if (payload.eventType === "INSERT")
+        return [...prev, payload.new].sort((a, b) => a.ordre - b.ordre);
+      if (payload.eventType === "UPDATE")
+        return prev.map((r) => (r.id === payload.new.id ? payload.new : r));
+      if (payload.eventType === "DELETE")
+        return prev.filter((r) => r.id !== payload.old.id);
+      return prev;
+    });
+  });
+
+  useRealtime("coproprietaires", (payload) => {
+    if (payload.eventType === "UPDATE") {
+      setCoproprietaires((prev) =>
+        prev.map((c) => (c.id === payload.new.id ? payload.new : c))
+      );
+    } else {
+      // INSERT / DELETE sont rares, un refetch complet suffit
+      fetchAll();
+    }
+  });
 
   const handleEndAG = async () => {
     if (!confirm("Terminer l'AG ? Toutes les résolutions en cours seront clôturées.")) return;
@@ -187,10 +207,10 @@ export function AdminView({ copropriete, agSession, onBack, onEndAG }) {
               QR Code Copropriétaires
             </h2>
             <div className="bg-white p-4 rounded-xl inline-block">
-              <QRCodeSVG value={window.location.origin} size={200} />
+              <QRCodeSVG value={window.location.origin.replace("syndic", "copro")} size={200} />
             </div>
             <p className="text-zinc-600 dark:text-zinc-400 text-sm">
-              {window.location.origin}
+              {window.location.origin.replace("syndic", "copro")}
             </p>
             <p className="text-zinc-500 text-xs">
               Les copropriétaires scannent ce QR pour accéder à l'interface de vote

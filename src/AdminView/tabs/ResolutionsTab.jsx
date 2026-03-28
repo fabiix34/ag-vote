@@ -1,9 +1,10 @@
 import { useState, useEffect } from "react";
-import { Plus, BookOpen, ChevronDown, ChevronUp, X, Loader2, Save } from "lucide-react";
+import { Plus, BookOpen, ChevronDown, ChevronUp, X, Loader2, Save, CheckCircle } from "lucide-react";
 import { supabase } from "../../App";
 import { ResolutionCard } from "../../ResolutionCard/ResolutionCard";
 import { PlaceholderEditor } from "../../ResolutionTemplates/PlaceholderEditor";
 import { applyValues, saveAsTemplate } from "../../ResolutionTemplates/templates";
+import { DocumentsSection } from "../../DocumentSection/DocumentSection";
 
 export function ResolutionsTab({ resolutions, votes, coproprietaires, agSessionId, isReadOnly, onUpdate }) {
   // --- États pour la Database (Modèles) ---
@@ -18,6 +19,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, agSessionI
   const [newMontant, setNewMontant] = useState("");
   const [showTemplates, setShowTemplates] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
+  const [newResolutionId, setNewResolutionId] = useState(null);
 
   // 1. Charger les modèles depuis Supabase au montage
   useEffect(() => {
@@ -45,6 +47,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, agSessionI
     setPlaceholderValues({});
     setNewMontant("");
     setShowTemplates(false);
+    setNewResolutionId(null);
   };
 
   // 2. Sélection d'un modèle
@@ -70,18 +73,18 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, agSessionI
         ? parseFloat(newMontant.replace(/\s/g, "").replace(",", "."))
         : -1;
 
-      const { error } = await supabase.from("resolutions").insert({
+      const { data, error } = await supabase.from("resolutions").insert({
         titre: newTitre.trim(),
         description: finalDesc.trim(),
         montant: isNaN(montantVal) ? -1 : montantVal,
         ordre: resolutions.length + 1,
         ag_session_id: agSessionId,
-      });
+      }).select("id").single();
 
       if (error) throw error;
 
-      resetForm();
-      onUpdate(); // Rafraîchir la liste parente
+      setNewResolutionId(data.id);
+      onUpdate();
     } catch (err) {
       console.error("Erreur ajout résolution:", err);
       alert("Erreur lors de l'ajout.");
@@ -228,36 +231,55 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, agSessionI
           <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-bold">€</span>
         </div>
 
+        {/* Section documents après enregistrement */}
+        {newResolutionId && (
+          <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 bg-zinc-50/50 dark:bg-zinc-800/30">
+            <DocumentsSection resolutionId={newResolutionId} canManage={true} />
+          </div>
+        )}
+
         {/* Actions */}
         <div className="flex items-center gap-3 pt-2">
-          <button
-            onClick={handleAddResolution}
-            disabled={isSaving || !newTitre.trim()}
-            className="flex items-center gap-2 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 text-white px-5 py-2 rounded-lg font-semibold transition-all shadow-sm shadow-emerald-200 dark:shadow-none"
-          >
-            {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-            Enregistrer la résolution
-          </button>
+          {!newResolutionId ? (
+            <>
+              <button
+                onClick={handleAddResolution}
+                disabled={isSaving || !newTitre.trim()}
+                className="flex items-center gap-2 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 text-white px-5 py-2 rounded-lg font-semibold transition-all shadow-sm shadow-emerald-200 dark:shadow-none"
+              >
+                {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
+                Enregistrer la résolution
+              </button>
 
-          {(newTitre || rawDesc) && (
-            <button
-              type="button"
-              disabled={isSaving}
-              onClick={handleSaveAsTemplate}
-              className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors font-medium border border-emerald-200 dark:border-emerald-800/50 px-2.5 py-1.5 rounded-lg bg-emerald-50/50 dark:bg-emerald-900/10"
-            >
-              {isSaving ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />}
-              Sauvegarder comme modèle
-            </button>
-          )}
+              {(newTitre || rawDesc) && (
+                <button
+                  type="button"
+                  disabled={isSaving}
+                  onClick={handleSaveAsTemplate}
+                  className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors font-medium border border-emerald-200 dark:border-emerald-800/50 px-2.5 py-1.5 rounded-lg bg-emerald-50/50 dark:bg-emerald-900/10"
+                >
+                  {isSaving ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />}
+                  Sauvegarder comme modèle
+                </button>
+              )}
 
-          {(newTitre || rawDesc) && (
+              {(newTitre || rawDesc) && (
+                <button
+                  type="button"
+                  onClick={resetForm}
+                  className="text-xs text-zinc-500 hover:text-red-500 transition-colors font-medium"
+                >
+                  Annuler
+                </button>
+              )}
+            </>
+          ) : (
             <button
               type="button"
               onClick={resetForm}
-              className="text-xs text-zinc-500 hover:text-red-500 transition-colors font-medium"
+              className="flex items-center gap-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg font-semibold transition-all"
             >
-              Annuler
+              <CheckCircle size={14} /> Terminer
             </button>
           )}
         </div>

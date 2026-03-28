@@ -4,6 +4,7 @@ import { CheckCircle, Edit3, Play, Trash2 } from "lucide-react";
 import { supabase } from "../App";
 import { StatutBadge } from "../StatutBadge/StatutBadge";
 import { ResultatsResolution } from "../ResultatsResolution/ResultatsResolution";
+import { DocumentsSection } from "../DocumentSection/DocumentSection";
 
 export function ResolutionCard({ resolution, votes, coproprietaires, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false);
@@ -77,6 +78,9 @@ export function ResolutionCard({ resolution, votes, coproprietaires, onUpdate, o
           )}
         </div>
       </div>
+
+      {/* Documents */}
+      <DocumentsSection resolutionId={resolution.id} canManage={resolution.statut === "en_attente"} />
 
       {/* Résultats si votes */}
       {(resolution.statut === "en_cours" || resolution.statut === "termine") && (
