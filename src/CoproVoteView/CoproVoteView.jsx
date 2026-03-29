@@ -256,7 +256,7 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
               <div className="p-4 space-y-3">
                 {voted && !isJustVoted && (
                   <p className="text-xs text-zinc-500 text-center mb-2">
-                    Vous avez voté · Vous pouvez modifier votre choix
+                    Vous avez voté · Vous ne pouvez plus modifier votre choix
                   </p>
                 )}
                 {voteButtons.map((btn) => {

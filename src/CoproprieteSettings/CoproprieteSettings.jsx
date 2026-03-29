@@ -99,7 +99,7 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
     setCreatingAG(false);
   };
 
-  const handleOpenAG = async (ag) => {
+  const startAG = async (ag) => {
     if (ag.statut === "planifiee") {
       // Démarrer l'AG
       const { data, error } = await supabase
@@ -189,11 +189,10 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                tab === t.id
+              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.id
                   ? "border-emerald-500 text-emerald-500 dark:text-emerald-400"
                   : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
+                }`}
             >
               <t.icon size={14} />
               {t.label}
@@ -297,10 +296,10 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
                       const info = STATUS_INFO[ag.statut] || STATUS_INFO.planifiee;
                       const dateStr = ag.date_ag
                         ? new Date(ag.date_ag).toLocaleDateString("fr-FR", {
-                            year: "numeric",
-                            month: "long",
-                            day: "numeric",
-                          })
+                          year: "numeric",
+                          month: "long",
+                          day: "numeric",
+                        })
                         : "Date non définie";
 
                       return (
@@ -325,33 +324,13 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
                           </div>
 
                           <div className="flex-shrink-0">
-                            {ag.statut === "planifiee" && (
-                              <button
-                                onClick={() => handleOpenAG(ag)}
-                                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
-                              >
-                                <Play size={14} />
-                                Démarrer
-                              </button>
-                            )}
-                            {ag.statut === "en_cours" && (
-                              <button
-                                onClick={() => handleOpenAG(ag)}
-                                className="flex items-center gap-2 bg-emerald-600 hover:bg-emerald-500 text-white px-4 py-2 rounded-lg text-sm font-semibold transition-colors"
-                              >
-                                <Eye size={14} />
-                                Gérer l'AG
-                              </button>
-                            )}
-                            {ag.statut === "terminee" && (
-                              <button
-                                onClick={() => onOpenAG(ag)}
-                                className="flex items-center gap-2 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 border border-zinc-200 dark:border-zinc-700 px-4 py-2 rounded-lg text-sm transition-colors"
-                              >
-                                <Eye size={14} />
-                                Consulter
-                              </button>
-                            )}
+                            <button
+                              onClick={() => onOpenAG(ag)}
+                              className="flex items-center gap-2 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 border border-zinc-200 dark:border-zinc-700 px-4 py-2 rounded-lg text-sm transition-colors"
+                            >
+                              <Eye size={14} />
+                              Accéder
+                            </button>
                           </div>
                         </div>
                       );

@@ -13,6 +13,7 @@ import {
   QrCode,
   ArrowLeft,
   StopCircle,
+  PlayCircle,
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useRealtime } from "../hooks/useRealtime";
@@ -23,7 +24,8 @@ import { ResolutionsTab } from "./tabs/ResolutionsTab";
 import { PVGenerator } from "../PVGenerator/PVGenerator";
 import { Loader } from "../Loader/Loader";
 
-export function AdminView({ copropriete, agSession, onBack, onEndAG }) {
+export function AdminView({ copropriete, agSession: initialAgSession, onBack, onEndAG }) {
+  const [agSession, setAgSession] = useState(initialAgSession);
   const [tab, setTab] = useState("dashboard");
   const [coproprietaires, setCoproprietaires] = useState([]);
   const [resolutions, setResolutions] = useState([]);
@@ -32,11 +34,13 @@ export function AdminView({ copropriete, agSession, onBack, onEndAG }) {
   const [showQR, setShowQR] = useState(false);
   const [connected, setConnected] = useState(true);
   const [ending, setEnding] = useState(false);
+  const [starting, setStarting] = useState(false);
 
+  const isPlanifiee = agSession.statut === "planifiee";
   const isTerminee = agSession.statut === "terminee";
 
   const fetchAll = useCallback(async () => {
-    const [{ data: copros }, { data: resols }, { data: vts }] = await Promise.all([
+    const [{ data: copros }, { data: resols }] = await Promise.all([
       supabase
         .from("coproprietaires")
         .select("*")
@@ -47,8 +51,11 @@ export function AdminView({ copropriete, agSession, onBack, onEndAG }) {
         .select("*")
         .eq("ag_session_id", agSession.id)
         .order("ordre"),
-      supabase.from("votes").select("*"),
     ]);
+    const resolutionIds = (resols || []).map((r) => r.id);
+    const { data: vts } = resolutionIds.length
+      ? await supabase.from("votes").select("*").in("resolution_id", resolutionIds)
+      : { data: [] };
     setCoproprietaires(copros || []);
     setResolutions(resols || []);
     setVotes(vts || []);
@@ -95,6 +102,13 @@ export function AdminView({ copropriete, agSession, onBack, onEndAG }) {
       fetchAll();
     }
   });
+
+  const handleStartAG = async () => {
+    setStarting(true);
+    await supabase.from("ag_sessions").update({ statut: "en_cours" }).eq("id", agSession.id);
+    setAgSession((prev) => ({ ...prev, statut: "en_cours" }));
+    setStarting(false);
+  };
 
   const handleEndAG = async () => {
     if (!confirm("Terminer l'AG ? Toutes les résolutions en cours seront clôturées.")) return;
@@ -145,7 +159,7 @@ export function AdminView({ copropriete, agSession, onBack, onEndAG }) {
               <span
                 className={isTerminee ? "text-zinc-400" : "text-emerald-500"}
               >
-                {isTerminee ? "Terminée" : "En cours"}
+                {isTerminee ? "Terminée" : isPlanifiee ? "Planifiée" : "En cours"}
               </span>
             </p>
           </div>
@@ -171,7 +185,18 @@ export function AdminView({ copropriete, agSession, onBack, onEndAG }) {
             />
           )}
 
-          {!isTerminee && (
+          {isPlanifiee && (
+            <button
+              onClick={handleStartAG}
+              disabled={starting}
+              className="flex items-center gap-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+            >
+              <PlayCircle size={14} />
+              {starting ? "Démarrage..." : "Démarrer l'AG"}
+            </button>
+          )}
+
+          {!isTerminee && !isPlanifiee && (
             <>
               <button
                 onClick={() => setShowQR(!showQR)}
