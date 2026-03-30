@@ -277,7 +277,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
               />
             )}
             {tab === "copros" && (
-              <CoprosTab coproprietaires={coproprietaires} votes={votes} />
+              <CoprosTab coproprietaires={coproprietaires} votes={votes} coproprieteId={copropriete.id} />
             )}
             {tab === "resolutions" && (
               <ResolutionsTab

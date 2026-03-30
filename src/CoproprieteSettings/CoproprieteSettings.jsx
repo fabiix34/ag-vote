@@ -57,13 +57,18 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
   const [nomValue, setNomValue] = useState(copropriete.nom);
   const [savingNom, setSavingNom] = useState(false);
 
+  const fetchCoproprietaires = async () => {
+    const { data, error } = await supabase
+      .from("coproprietaires")
+      .select("*")
+      .eq("copropriete_id", copropriete.id)
+      .order("nom");
+    if (!error) setCoproprietaires(data || []);
+  };
+
   const fetchAll = useCallback(async () => {
-    const [{ data: copros }, { data: vts }, { data: ags }] = await Promise.all([
-      supabase
-        .from("coproprietaires")
-        .select("*")
-        .eq("copropriete_id", copropriete.id)
-        .order("nom"),
+    const [, { data: vts }, { data: ags }] = await Promise.all([
+      fetchCoproprietaires(),
       supabase.from("votes").select("*"),
       supabase
         .from("ag_sessions")
@@ -71,7 +76,6 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
         .eq("copropriete_id", copropriete.id)
         .order("created_at", { ascending: false }),
     ]);
-    setCoproprietaires(copros || []);
     setVotes(vts || []);
     setAgSessions(ags || []);
     setLoading(false);
@@ -167,7 +171,7 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
             </div>
           ) : (
             <div className="flex items-center gap-2 flex-1 min-w-0">
-              <h1 className="font-bold text-zinc-900 dark:text-white truncate">{copropriete.nom}</h1>
+              <h1 className="font-bold text-zinc-600 dark:text-white truncate leading-normal">{copropriete.nom}</h1>
               <button
                 onClick={() => setEditingNom(true)}
                 className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 flex-shrink-0"
@@ -216,7 +220,7 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
                   {coproprietaires.length > 1 ? "s" : ""} enregistré
                   {coproprietaires.length > 1 ? "s" : ""}
                 </p>
-                <CoprosTab coproprietaires={coproprietaires} votes={votes} />
+                <CoprosTab coproprietaires={coproprietaires} votes={votes} coproprieteId={copropriete.id} onSave={fetchCoproprietaires} onDelete={fetchCoproprietaires}/>
               </div>
             )}
 
