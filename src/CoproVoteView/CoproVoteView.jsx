@@ -84,6 +84,13 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
     });
   });
 
+  useRealtime("ag_sessions", (payload) => {
+    if (payload.new?.id !== agSession?.id) return;
+    if (payload.eventType === "UPDATE" && payload.new?.statut === "terminee") {
+      onLogout();
+    }
+  });
+
   useRealtime("resolutions", (payload) => {
     if (payload.new?.ag_session_id !== agSession?.id && payload.old?.ag_session_id !== agSession?.id) return;
     setResolutions((prev) => {
@@ -206,7 +213,11 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
     { choix: "abstention", label: "ABSTENTION", icon: MinusCircle, color: "bg-zinc-700 hover:bg-zinc-600 border-zinc-700", activeColor: "ring-4 ring-zinc-500/40 bg-zinc-700" },
   ];
 
-  const votableResolutions = resolutions.filter((r) => r.statut !== "termine");
+  const votableResolutions = resolutions.filter((r) => {
+    if (r.statut === "termine") return false;
+    if (agSession?.vote_anticipe_actif) return true; // vote anticipé : toutes sauf terminées
+    return r.statut === "en_cours"; // séance live : seulement celles lancées par le syndic
+  });
   const closedVotes = votes.filter((v) => !votableResolutions.find((r) => r.id === v.resolution_id));
 
   return (
@@ -300,8 +311,17 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
             <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mx-auto">
               <Vote size={28} className="text-zinc-400 dark:text-zinc-500" />
             </div>
-            <p className="text-zinc-700 dark:text-zinc-300 font-medium">En attente d'un vote</p>
-            <p className="text-zinc-500 text-sm">Le syndic n'a pas encore lancé de résolution</p>
+            {agSession.statut === "planifiee" ? (
+              <>
+                <p className="text-zinc-700 dark:text-zinc-300 font-medium">L'AG n'a pas encore démarré</p>
+                <p className="text-zinc-500 text-sm">Vous serez notifié dès l'ouverture du vote</p>
+              </>
+            ) : (
+              <>
+                <p className="text-zinc-700 dark:text-zinc-300 font-medium">En attente d'un vote</p>
+                <p className="text-zinc-500 text-sm">Le syndic n'a pas encore lancé de résolution</p>
+              </>
+            )}
             <div className="flex items-center justify-center gap-2 text-zinc-600 text-xs">
               <div className="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse" />
               Synchronisation temps réel active
