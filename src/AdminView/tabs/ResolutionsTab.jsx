@@ -6,7 +6,7 @@ import { PlaceholderEditor } from "../../ResolutionTemplates/PlaceholderEditor";
 import { applyValues, saveAsTemplate } from "../../ResolutionTemplates/templates";
 import { DocumentsSection } from "../../DocumentSection/DocumentSection";
 
-export function ResolutionsTab({ resolutions, votes, coproprietaires, agSessionId, isReadOnly, onUpdate }) {
+export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, agSessionId, canModifyAgenda, canEditResolution, canLaunchVote, showAnticipeResults, isReadOnly, onUpdate }) {
   // --- États pour la Database (Modèles) ---
   const [dbModeles, setDbModeles] = useState([]);
   const [dbCategories, setDbCategories] = useState([]);
@@ -143,7 +143,12 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, agSessionI
           Cette AG est terminée — les résolutions ne peuvent plus être modifiées.
         </div>
       )}
-      {!isReadOnly && (
+      {!isReadOnly && !canModifyAgenda && (
+        <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800/50 rounded-xl px-4 py-3 text-sm text-amber-700 dark:text-amber-400">
+          Le vote est ouvert — l'ordre du jour est verrouillé.
+        </div>
+      )}
+      {canModifyAgenda && (
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 space-y-4 shadow-sm">
 
         <div className="flex items-center justify-between">
@@ -309,6 +314,11 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, agSessionI
                 resolution={r}
                 votes={votes}
                 coproprietaires={coproprietaires}
+                pouvoirs={pouvoirs || []}
+                canModifyAgenda={canModifyAgenda}
+                canEditResolution={canEditResolution}
+                canLaunchVote={canLaunchVote}
+                showAnticipeResults={showAnticipeResults}
                 onUpdate={onUpdate}
                 onDelete={handleDeleteResolution}
               />

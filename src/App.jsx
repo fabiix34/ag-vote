@@ -1,7 +1,6 @@
 import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from "react-router-dom";
 import { createClient } from "@supabase/supabase-js";
-import { Shield, Vote } from "lucide-react";
 import { useDomain } from "./hooks/useDomain";
 import { SyndicAuth } from "./SyndicAuth/SyndicAuth";
 import { SyndicDashboard } from "./SyndicDashboard/SyndicDashboard";
@@ -149,6 +148,11 @@ function CoproRootPage() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    // Conserver le token pouvoir en session avant redirection
+    const params = new URLSearchParams(window.location.search);
+    const token = params.get("pouvoir");
+    if (token) sessionStorage.setItem("pending_pouvoir_token", token);
+
     const stored = localStorage.getItem("copro_profile");
     if (stored) navigate("/vote", { replace: true });
     else setReady(true);
@@ -175,7 +179,9 @@ function CoproVotePage() {
           .from("ag_sessions")
           .select("*")
           .eq("copropriete_id", p.copropriete_id)
-          .eq("statut", "en_cours")
+          .in("statut", ["planifiee", "en_cours"])
+          .order("date_ag", { ascending: false })
+          .limit(1)
           .single();
         setAgSession(ag || null);
       }
@@ -197,39 +203,6 @@ function CoproVotePage() {
         navigate("/", { replace: true });
       }}
     />
-  );
-}
-
-// ============================================================
-// PAGE PAR DÉFAUT (ni syndic.* ni copro.*)
-// ============================================================
-function GuestPage() {
-  return (
-    <div className="min-h-screen bg-[var(--bg)] flex flex-col items-center justify-center p-6 space-y-8">
-      <div className="text-center space-y-3">
-        <div className="w-16 h-16 rounded-2xl bg-emerald-600 flex items-center justify-center mx-auto shadow-lg shadow-emerald-600/30">
-          <Shield size={32} className="text-white" />
-        </div>
-        <h1 className="text-2xl font-bold text-zinc-900 dark:text-white">AG-Copro</h1>
-        <p className="text-zinc-500 text-sm">Gestion d'assemblées générales de copropriété</p>
-      </div>
-      <div className="flex flex-col gap-3 w-full max-w-xs">
-        <a
-          href={window.location.href.replace(window.location.hostname, "syndic." + window.location.hostname)}
-          className="w-full bg-emerald-600 hover:bg-emerald-500 text-white font-bold py-4 rounded-xl text-base transition-colors flex items-center justify-center gap-2 shadow-sm"
-        >
-          <Shield size={18} />
-          Espace Syndic
-        </a>
-        <a
-          href={window.location.href.replace(window.location.hostname, "copro." + window.location.hostname)}
-          className="w-full bg-zinc-800 hover:bg-zinc-700 dark:bg-zinc-700 dark:hover:bg-zinc-600 text-white font-bold py-4 rounded-xl text-base transition-colors flex items-center justify-center gap-2"
-        >
-          <Vote size={18} />
-          Espace Copropriétaire
-        </a>
-      </div>
-    </div>
   );
 }
 

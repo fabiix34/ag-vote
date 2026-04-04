@@ -26,3 +26,5 @@ dist-ssr
 .env.production
 .gitignore
 supabase/snippets/**
+**.cache
+.firebase/hosting.ZGlzdA.cache

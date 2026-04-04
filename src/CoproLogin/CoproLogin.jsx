@@ -58,7 +58,10 @@ export function CoproLogin({ onLogin, onBack = null }) {
 
   const handleDateChange = (val) => {
     const digits = val.replace(/\D/g, "").slice(0, 8);
-    setDateNaissance(digits);
+    let formatted = digits;
+    if (digits.length > 4) formatted = digits.slice(0, 2) + "/" + digits.slice(2, 4) + "/" + digits.slice(4);
+    else if (digits.length > 2) formatted = digits.slice(0, 2) + "/" + digits.slice(2);
+    setDateNaissance(formatted);
   };
 
   return (
@@ -109,12 +112,12 @@ export function CoproLogin({ onLogin, onBack = null }) {
               type="text"
               inputMode="numeric"
               className="w-full bg-white dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 rounded-xl px-4 py-3.5 text-zinc-900 dark:text-white placeholder-zinc-400 dark:placeholder-zinc-600 focus:outline-none focus:border-emerald-500 text-base font-mono tracking-[0.3em] transition-colors"
-              placeholder="JJMMAAAA"
+              placeholder="JJ/MM/AAAA"
               value={dateNaissance}
               onChange={(e) => handleDateChange(e.target.value)}
-              maxLength={8}
+              maxLength={10}
             />
-            <p className="text-xs text-zinc-500">Ex : 15031975 pour le 15 mars 1975</p>
+            <p className="text-xs text-zinc-500">Ex : 15/03/1975 pour le 15 mars 1975</p>
           </div>
 
           {error && (

@@ -2,11 +2,26 @@ import { ResultatsResolution } from "../../ResultatsResolution/ResultatsResoluti
 import { formatTantiemes } from "../../hooks/formatTantieme";
 import { calcPourcentage } from "../../hooks/calcPourcentage";
 
-export function DashboardTab({ coproprietaires, resolutions, votes }) {
+export function DashboardTab({ coproprietaires, resolutions, votes, agSession, pouvoirs = [] }) {
   const presents = coproprietaires.filter((c) => c.presence);
+
+  // Copros ayant déjà voté en anticipé (au moins une résolution)
+  const idsAyantVoteAnticipe = agSession?.vote_anticipe_actif
+    ? [...new Set(votes.map((v) => v.coproprietaire_id))]
+    : [];
+
   const totalTant = coproprietaires.reduce((s, c) => s + c.tantiemes, 0);
   const tantPresents = presents.reduce((s, c) => s + c.tantiemes, 0);
-  const quorum = calcPourcentage(tantPresents, totalTant);
+
+  // Tantièmes des mandants représentés par un mandataire présent (non double-comptés)
+  const tantRepresentés = pouvoirs
+    .filter((p) => presents.find((c) => c.id === p.mandataire_id))
+    .map((p) => coproprietaires.find((c) => c.id === p.mandant_id))
+    .filter((c) => c && !c.presence)
+    .reduce((s, c) => s + c.tantiemes, 0);
+
+  const tantQuorum = tantPresents + tantRepresentés;
+  const quorum = calcPourcentage(tantQuorum, totalTant);
 
   return (
     <div className="space-y-6">
@@ -14,7 +29,7 @@ export function DashboardTab({ coproprietaires, resolutions, votes }) {
       <div className="grid grid-cols-4 gap-4">
         {[
           { label: "Copropriétaires", value: coproprietaires.length, sub: "total", color: "text-zinc-300" },
-          { label: "Présents", value: presents.length, sub: `${quorum}% des tantièmes`, color: "text-emerald-400" },
+          { label: "Présents", value: presents.length, sub: `${quorum}% des tantièmes (repr. inclus)`, color: "text-emerald-400" },
           { label: "Résolutions", value: resolutions.length, sub: `${resolutions.filter(r => r.statut === "en_cours").length} en cours`, color: "text-blue-400" },
           { label: "Votes exprimés", value: votes.length, sub: "total", color: "text-amber-400" },
         ].map((k) => (
@@ -29,11 +44,18 @@ export function DashboardTab({ coproprietaires, resolutions, votes }) {
       {/* Quorum */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 space-y-2">
         <div className="flex justify-between text-sm">
-          <span className="text-zinc-600 dark:text-zinc-400 font-medium">Quorum (tantièmes présents)</span>
+          <span className="text-zinc-600 dark:text-zinc-400 font-medium">
+            Quorum (présents + représentés)
+          </span>
           <span className={`font-bold ${quorum >= 50 ? "text-emerald-400" : "text-amber-400"}`}>
-            {formatTantiemes(tantPresents)} / {formatTantiemes(totalTant)} — {quorum}%
+            {formatTantiemes(tantQuorum)} / {formatTantiemes(totalTant)} — {quorum}%
           </span>
         </div>
+        {tantRepresentés > 0 && (
+          <p className="text-xs text-blue-500 dark:text-blue-400">
+            dont {formatTantiemes(tantRepresentés)} tantièmes représentés par pouvoir
+          </p>
+        )}
         <div className="h-3 bg-zinc-200 dark:bg-zinc-800 rounded-full overflow-hidden">
           <div
             className={`h-full rounded-full transition-all duration-700 ${quorum >= 50 ? "bg-emerald-500" : "bg-amber-500"}`}
@@ -42,6 +64,32 @@ export function DashboardTab({ coproprietaires, resolutions, votes }) {
         </div>
         {quorum < 50 && <p className="text-xs text-amber-400">⚠ Quorum insuffisant pour délibérer (50% requis)</p>}
       </div>
+
+      {/* Votes anticipés */}
+      {agSession?.vote_anticipe_actif && idsAyantVoteAnticipe.length > 0 && (
+        <div className="bg-blue-500/5 border border-blue-200 dark:border-blue-800/50 rounded-xl overflow-hidden">
+          <div className="px-4 py-3 border-b border-blue-100 dark:border-blue-900/50 flex items-center justify-between">
+            <h3 className="font-medium text-blue-800 dark:text-blue-300 text-sm">Votes par correspondance reçus</h3>
+            <span className="text-xs text-blue-500">{idsAyantVoteAnticipe.length} copropriétaire{idsAyantVoteAnticipe.length > 1 ? "s" : ""}</span>
+          </div>
+          <div className="divide-y divide-blue-100 dark:divide-blue-900/30 max-h-48 overflow-y-auto">
+            {idsAyantVoteAnticipe.map((coproId) => {
+              const copro = coproprietaires.find((c) => c.id === coproId);
+              const nbVotes = votes.filter((v) => v.coproprietaire_id === coproId).length;
+              return (
+                <div key={coproId} className="px-4 py-2 flex items-center justify-between">
+                  <span className="text-sm text-zinc-800 dark:text-zinc-200">
+                    {copro ? `${copro.prenom} ${copro.nom}` : coproId.slice(0, 8)}
+                  </span>
+                  <span className="text-xs text-blue-500 font-medium">
+                    {nbVotes} résolution{nbVotes > 1 ? "s" : ""}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* Live votes pour résolution en cours */}
       {resolutions.filter(r => r.statut === "en_cours").map((r) => (
