@@ -179,33 +179,111 @@ export const voteService = {
 };
 
 // ─── POUVOIRS ────────────────────────────────────────────────────────────────
+// Les pouvoirs "cancelled" sont conservés en base (soft-delete) pour le PV d'AG.
+// Toutes les requêtes métier filtrent sur statut != 'cancelled'.
 
 export const pouvoirService = {
+  // Tous les pouvoirs actifs/en attente d'une AG (pour le syndic)
   fetchByAgSession: (agSessionId) =>
-    supabase.from("pouvoirs").select("*").eq("ag_session_id", agSessionId),
+    supabase.from("pouvoirs").select("*")
+      .eq("ag_session_id", agSessionId)
+      .neq("statut", "cancelled"),
 
+  // Pouvoirs reçus par un mandataire (avec données du mandant)
   fetchForMandataire: (agSessionId, mandataireId) =>
     supabase.from("pouvoirs")
       .select("*, mandant:coproprietaires!mandant_id(id,nom,prenom,tantiemes)")
       .eq("ag_session_id", agSessionId)
-      .eq("mandataire_id", mandataireId),
+      .eq("mandataire_id", mandataireId)
+      .neq("statut", "cancelled"),
 
+  // Pouvoir donné par un mandant pour cette AG (actif ou en attente)
   fetchDonne: (agSessionId, mandantId) =>
     supabase.from("pouvoirs")
       .select("*, mandataire:coproprietaires!mandataire_id(id,nom,prenom)")
       .eq("ag_session_id", agSessionId)
       .eq("mandant_id", mandantId)
+      .neq("statut", "cancelled")
       .maybeSingle(),
+
+  // Historique complet pour le PV (inclut les annulés)
+  fetchHistoriqueByAgSession: (agSessionId) =>
+    supabase.from("pouvoirs")
+      .select("*, mandant:coproprietaires!mandant_id(id,nom,prenom,tantiemes), mandataire:coproprietaires!mandataire_id(id,nom,prenom)")
+      .eq("ag_session_id", agSessionId)
+      .order("created_at"),
 
   create: (mandantId, mandataireId, agSessionId) =>
     supabase.from("pouvoirs")
-      .insert({ mandant_id: mandantId, mandataire_id: mandataireId, ag_session_id: agSessionId, votes_imposes: {} }),
+      .insert({ mandant_id: mandantId, mandataire_id: mandataireId, ag_session_id: agSessionId, votes_imposes: {} })
+      .select().single(),
 
   updateVotesImposes: (id, votesImposes) =>
     supabase.from("pouvoirs").update({ votes_imposes: votesImposes }).eq("id", id),
 
-  delete: (id) =>
-    supabase.from("pouvoirs").delete().eq("id", id),
+  // Soft-delete : marque cancelled + deleted_at, conserve la ligne pour le PV
+  softDelete: (id) =>
+    supabase.from("pouvoirs")
+      .update({ statut: "cancelled", deleted_at: new Date().toISOString() })
+      .eq("id", id),
+
+  // Vérification du quota art. 22 (appel RPC côté frontend avant insertion)
+  // Retourne { allowed, count, ratio?, reason?, detail? }
+  checkQuota: (mandataireId, agSessionId, newMandantId) =>
+    supabase.rpc("check_pouvoir_quota_rpc", {
+      p_mandataire_id:  mandataireId,
+      p_ag_session_id:  agSessionId,
+      p_new_mandant_id: newMandantId,
+    }),
+
+  // ── Cycle de vie dynamique ──────────────────────────────────────────────
+
+  // Poids de vote dynamique pour une résolution précise.
+  // Retourne { total_tantiemes, own_tantiemes, mandants_count, mandants[] }
+  getVotingWeight: (userId, resolutionId) =>
+    supabase.rpc("get_voting_weight", {
+      p_user_id:       userId,
+      p_resolution_id: resolutionId,
+    }),
+
+  // Récupération de pouvoir (arrivée en séance). Respecte la règle N+1.
+  // Retourne { success, pouvoir_archived_id, vote_en_cours, copro_votes_from }
+  handleRecovery: (coproId, currentResolutionId) =>
+    supabase.rpc("handle_power_recovery", {
+      p_copro_id:               coproId,
+      p_current_resolution_id:  currentResolutionId,
+    }),
+
+  // Re-délégation après départ (départ en cours de séance). Respecte N+1 + quotas.
+  // Retourne { success, pouvoir_id, effective_from_id } ou { success: false, reason }
+  handleRedonation: (fromId, toId, currentResolutionId) =>
+    supabase.rpc("handle_power_redonation", {
+      p_from_id:                fromId,
+      p_to_id:                  toId,
+      p_current_resolution_id:  currentResolutionId,
+    }),
+
+  // Création avec transfert de chaîne (A→B puis B→C ⟹ A→C)
+  // Retourne { pouvoir_id, statut, chained_count, chained_transfers[] }
+  createWithChain: (mandantId, mandataireId, agSessionId) =>
+    supabase.rpc("create_pouvoir_with_chain", {
+      p_mandant_id:    mandantId,
+      p_mandataire_id: mandataireId,
+      p_ag_session_id: agSessionId,
+    }),
+
+  // Pouvoirs actifs pour un mandataire À UNE RÉSOLUTION DONNÉE (filtre par plage)
+  fetchForMandataireAtResolution: (agSessionId, mandataireId) =>
+    supabase.from("pouvoirs")
+      .select(`
+        *,
+        mandant:coproprietaires!mandant_id(id,nom,prenom,tantiemes),
+        r_start:resolutions!start_resolution_id(ordre),
+        r_end:resolutions!end_resolution_id(ordre)
+      `)
+      .eq("ag_session_id", agSessionId)
+      .eq("mandataire_id", mandataireId)
+      .not("statut", "in", '("cancelled","archived")'),
 };
 
 // ─── POUVOIR TOKENS ──────────────────────────────────────────────────────────
@@ -232,6 +310,54 @@ export const pouvoirTokenService = {
 
   markUsed: (id) =>
     supabase.from("pouvoir_tokens").update({ used: true }).eq("id", id),
+};
+
+// ─── AUDIT LOGS ──────────────────────────────────────────────────────────────
+// Piste d'audit juridique (art. 22, loi 1965). Table immuable.
+// La majorité des entrées est créée par des triggers PostgreSQL.
+// Le frontend y insère uniquement les tentatives de violation de quota.
+
+export const auditLogsService = {
+  // Enregistre une tentative de violation de quota (bloquée côté frontend)
+  logQuotaViolation: (agSessionId, mandataireId, detail) =>
+    supabase.from("audit_logs").insert({
+      ag_session_id:     agSessionId,
+      coproprietaire_id: mandataireId,
+      action:            "pouvoir_quota_violation",
+      details:           { detail },
+    }),
+
+  logPouvoirCancelledManual: (agSessionId, mandantId, pouvoirId, mandataireId) =>
+    supabase.from("audit_logs").insert({
+      ag_session_id:     agSessionId,
+      coproprietaire_id: mandantId,
+      action:            "pouvoir_cancelled_manual",
+      details:           { pouvoir_id: pouvoirId, mandataire_id: mandataireId },
+    }),
+
+  fetchByAgSession: (agSessionId) =>
+    supabase.from("audit_logs").select("*")
+      .eq("ag_session_id", agSessionId)
+      .order("created_at", { ascending: true }),
+};
+
+// ─── LOGS AG ─────────────────────────────────────────────────────────────────
+// Table immuable : pas d'UPDATE ni de DELETE côté RLS.
+// types : 'connexion' | 'deconnexion' | 'pouvoir_donne' | 'pouvoir_revoque'
+
+export const logsAgService = {
+  insert: (agSessionId, coproprietaireId, type, details = {}) =>
+    supabase.from("logs_ag").insert({
+      ag_session_id: agSessionId || null,
+      coproprietaire_id: coproprietaireId,
+      type,
+      details,
+    }),
+
+  fetchByAgSession: (agSessionId) =>
+    supabase.from("logs_ag").select("*")
+      .eq("ag_session_id", agSessionId)
+      .order("created_at", { ascending: true }),
 };
 
 // ─── DOCUMENTS ───────────────────────────────────────────────────────────────

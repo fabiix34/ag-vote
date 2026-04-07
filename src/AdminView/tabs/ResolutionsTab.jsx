@@ -1,10 +1,10 @@
-import { useState, useEffect } from "react";
-import { Plus, BookOpen, ChevronDown, ChevronUp, X, Loader2, Save, CheckCircle } from "lucide-react";
-import { resolutionService, templateService } from "../../services/db";
+import { useState, useEffect, useRef } from "react";
+import { Plus, BookOpen, ChevronDown, ChevronUp, X, Loader2, Paperclip, FileText } from "lucide-react";
+import { resolutionService, templateService, documentService } from "../../services/db";
+import { supabase } from "../../lib/supabase";
 import { ResolutionCard } from "../../ResolutionCard/ResolutionCard";
 import { PlaceholderEditor } from "../../ResolutionTemplates/PlaceholderEditor";
 import { applyValues, saveAsTemplate } from "../../ResolutionTemplates/templates";
-import { DocumentsSection } from "../../DocumentSection/DocumentSection";
 import { MAJORITY_RULE_OPTIONS } from "../../utils/voteMajorityCalculator";
 
 export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, agSessionId, canModifyAgenda, canEditResolution, canLaunchVote, showAnticipeResults, isReadOnly, onUpdate }) {
@@ -17,11 +17,11 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
   const [newTitre, setNewTitre] = useState("");
   const [rawDesc, setRawDesc] = useState("");
   const [placeholderValues, setPlaceholderValues] = useState({});
-  const [newMontant, setNewMontant] = useState("");
   const [newMajorityRule, setNewMajorityRule] = useState("ARTICLE_24");
   const [showTemplates, setShowTemplates] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
-  const [newResolutionId, setNewResolutionId] = useState(null);
+  const [pendingFiles, setPendingFiles] = useState([]);
+  const fileRef = useRef();
 
   // 1. Charger les modèles depuis Supabase au montage
   useEffect(() => {
@@ -39,14 +39,16 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
     setIsLoadingTemplates(false);
   };
 
+  const sanitizeFilename = (name) =>
+    name.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-zA-Z0-9._-]/g, "_");
+
   const resetForm = () => {
     setNewTitre("");
     setRawDesc("");
     setPlaceholderValues({});
-    setNewMontant("");
     setNewMajorityRule("ARTICLE_24");
     setShowTemplates(false);
-    setNewResolutionId(null);
+    setPendingFiles([]);
   };
 
   // 2. Sélection d'un modèle
@@ -58,31 +60,39 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
     setShowTemplates(false);
   };
 
-  // 3. Sauvegarde de la résolution dans l'AG
+  // 3. Sauvegarde de la résolution + upload des fichiers en attente
   const handleAddResolution = async () => {
     if (!newTitre.trim()) return;
     setIsSaving(true);
 
     try {
-      // Fusion des placeholders dans le texte final
       const finalDesc = applyValues(rawDesc, placeholderValues);
-
-      // Nettoyage du montant
-      const montantVal = newMontant.trim()
-        ? parseFloat(newMontant.replace(/\s/g, "").replace(",", "."))
-        : -1;
 
       const { data, error } = await resolutionService.create(agSessionId, {
         titre: newTitre.trim(),
         description: finalDesc.trim(),
-        montant: isNaN(montantVal) ? -1 : montantVal,
         ordre: resolutions.length + 1,
         majority_rule: newMajorityRule,
       });
 
       if (error) throw error;
 
-      setNewResolutionId(data.id);
+      // Upload des fichiers stagés
+      if (pendingFiles.length > 0) {
+        await Promise.all(
+          pendingFiles.map(async (file) => {
+            const path = `${data.id}/${Date.now()}-${sanitizeFilename(file.name)}`;
+            const { error: storageError } = await supabase.storage
+              .from("resolution-docs")
+              .upload(path, file);
+            if (!storageError) {
+              await documentService.create(data.id, file.name, path);
+            }
+          })
+        );
+      }
+
+      resetForm();
       onUpdate();
     } catch (err) {
       console.error("Erreur ajout résolution:", err);
@@ -221,16 +231,6 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
 
         {/* Champs Montant + Règle de majorité */}
         <div className="flex flex-wrap gap-3 items-end">
-          <div className="relative max-w-[200px]">
-            <input
-              className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-300 dark:border-zinc-700 rounded-lg px-3 py-2 pr-8 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 font-mono"
-              placeholder="Montant total €"
-              value={newMontant}
-              onChange={e => setNewMontant(e.target.value)}
-              inputMode="decimal"
-            />
-            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-bold">€</span>
-          </div>
 
           {/* Règle de majorité (loi du 10 juillet 1965) */}
           <div className="flex flex-col gap-1">
@@ -247,55 +247,82 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
           </div>
         </div>
 
-        {/* Section documents après enregistrement */}
-        {newResolutionId && (
-          <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 bg-zinc-50/50 dark:bg-zinc-800/30">
-            <DocumentsSection resolutionId={newResolutionId} canManage={true} />
+        {/* Section fichiers — staging avant création */}
+        <div className="border border-zinc-200 dark:border-zinc-700 rounded-lg p-3 bg-zinc-50/50 dark:bg-zinc-800/30 space-y-2">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-medium text-zinc-500 dark:text-zinc-400 flex items-center gap-1.5">
+              <Paperclip size={11} /> Documents joints {pendingFiles.length > 0 && `(${pendingFiles.length})`}
+            </p>
+            <button
+              type="button"
+              onClick={() => fileRef.current.click()}
+              className="text-xs text-emerald-600 dark:text-emerald-400 hover:underline flex items-center gap-1"
+            >
+              <Plus size={11} /> Ajouter
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files[0];
+                if (file) setPendingFiles((prev) => [...prev, file]);
+                e.target.value = "";
+              }}
+            />
           </div>
-        )}
+          {pendingFiles.length === 0 && (
+            <p className="text-xs text-zinc-400 dark:text-zinc-600 italic">Aucun document joint</p>
+          )}
+          {pendingFiles.length > 0 && (
+            <div className="space-y-1">
+              {pendingFiles.map((file, i) => (
+                <div key={i} className="flex items-center gap-2 bg-zinc-100 dark:bg-zinc-800/60 rounded-lg px-2.5 py-1.5 text-xs">
+                  <FileText size={11} className="text-zinc-400 shrink-0" />
+                  <span className="flex-1 truncate text-zinc-700 dark:text-zinc-300">{file.name}</span>
+                  <button
+                    type="button"
+                    onClick={() => setPendingFiles((prev) => prev.filter((_, j) => j !== i))}
+                    className="text-zinc-400 hover:text-red-500 transition-colors shrink-0"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
 
         {/* Actions */}
         <div className="flex items-center gap-3 pt-2">
-          {!newResolutionId ? (
-            <>
-              <button
-                onClick={handleAddResolution}
-                disabled={isSaving || !newTitre.trim()}
-                className="flex items-center gap-2 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 text-white px-5 py-2 rounded-lg font-semibold transition-all shadow-sm shadow-emerald-200 dark:shadow-none"
-              >
-                {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Save size={14} />}
-                Enregistrer la résolution
-              </button>
+          <button
+            onClick={handleAddResolution}
+            disabled={isSaving || !newTitre.trim()}
+            className="flex items-center gap-2 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:bg-zinc-300 dark:disabled:bg-zinc-800 text-white px-5 py-2 rounded-lg font-semibold transition-all shadow-sm shadow-emerald-200 dark:shadow-none"
+          >
+            {isSaving ? <Loader2 size={14} className="animate-spin" /> : <Plus size={14} />}
+            {isSaving ? "Enregistrement..." : "Ajouter la résolution"}
+          </button>
 
-              {(newTitre || rawDesc) && (
-                <button
-                  type="button"
-                  disabled={isSaving}
-                  onClick={handleSaveAsTemplate}
-                  className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors font-medium border border-emerald-200 dark:border-emerald-800/50 px-2.5 py-1.5 rounded-lg bg-emerald-50/50 dark:bg-emerald-900/10"
-                >
-                  {isSaving ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />}
-                  Sauvegarder comme modèle
-                </button>
-              )}
+          {(newTitre || rawDesc) && (
+            <button
+              type="button"
+              disabled={isSaving}
+              onClick={handleSaveAsTemplate}
+              className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400 hover:text-emerald-700 dark:hover:text-emerald-300 transition-colors font-medium border border-emerald-200 dark:border-emerald-800/50 px-2.5 py-1.5 rounded-lg bg-emerald-50/50 dark:bg-emerald-900/10"
+            >
+              {isSaving ? <Loader2 size={12} className="animate-spin" /> : <BookOpen size={12} />}
+              Sauvegarder comme modèle
+            </button>
+          )}
 
-              {(newTitre || rawDesc) && (
-                <button
-                  type="button"
-                  onClick={resetForm}
-                  className="text-xs text-zinc-500 hover:text-red-500 transition-colors font-medium"
-                >
-                  Annuler
-                </button>
-              )}
-            </>
-          ) : (
+          {(newTitre || rawDesc || pendingFiles.length > 0) && (
             <button
               type="button"
               onClick={resetForm}
-              className="flex items-center gap-2 text-sm bg-emerald-600 hover:bg-emerald-500 text-white px-5 py-2 rounded-lg font-semibold transition-all"
+              className="text-xs text-zinc-500 hover:text-red-500 transition-colors font-medium"
             >
-              <CheckCircle size={14} /> Terminer
+              Annuler
             </button>
           )}
         </div>

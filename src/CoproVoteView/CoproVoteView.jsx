@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, MinusCircle, LogOut, Vote, Check, Share2, Copy, UserCheck, X } from "lucide-react";
-import { resolutionService, voteService, coproprietaireService, pouvoirService, pouvoirTokenService } from "../services/db";
+import { resolutionService, voteService, coproprietaireService, pouvoirService, pouvoirTokenService, logsAgService, auditLogsService } from "../services/db";
 import { useRealtime } from "../hooks/useRealtime";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
@@ -13,6 +13,8 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   const [pouvoirDonne, setPouvoirDonne] = useState(null); // pouvoir où l'utilisateur est mandant
   const [, setVoting] = useState(null);
   const [justVoted, setJustVoted] = useState(null);
+  // Poids de vote dynamique pour la résolution en cours (get_voting_weight)
+  const [votingWeight, setVotingWeight] = useState(null);
 
   // Donner mon pouvoir — génération de lien
   const [pouvoirLink, setPouvoirLink] = useState(null);
@@ -23,9 +25,15 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   // Instructions de vote imposées au mandataire
   const [savingVoteImpose, setSavingVoteImpose] = useState(null); // resolution_id en cours de sauvegarde
 
+  // Révocation de pouvoir
+  const [confirmRevoke, setConfirmRevoke] = useState(false);
+  const [revokingPouvoir, setRevokingPouvoir] = useState(false);
+
   // Acceptation d'un pouvoir reçu via lien
   const [pendingToken, setPendingToken] = useState(null);
   const [acceptingPouvoir, setAcceptingPouvoir] = useState(false);
+  const [quotaError, setQuotaError] = useState(null); // message d'erreur quota art. 22
+  const [chainInfo, setChainInfo]   = useState(null); // info transfert en chaîne
 
   useEffect(() => {
     if (!agSession?.id) return;
@@ -57,18 +65,53 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
       });
   }, [agSession?.id, profile.id]);
 
-  // Mise à jour des pouvoirs en temps réel — notamment pour récupérer les votes_imposes
-  // fixés par le mandant depuis son interface, sans quoi la vérification de cascade serait obsolète.
+  // Mise à jour des pouvoirs en temps réel.
+  // Les pouvoirs annulés (cancelled) sont retirés de la liste active ;
+  // un pouvoir pending_activation qui passe à active est mis à jour.
   useRealtime("pouvoirs", (payload) => {
-    if (payload.new?.mandataire_id !== profile.id && payload.old?.mandataire_id !== profile.id) return;
-    setPouvoirs((prev) => {
-      if (payload.eventType === "UPDATE")
-        // On merge pour préserver le champ mandant (jointure) absent du payload realtime
-        return prev.map((p) => (p.id === payload.new.id ? { ...p, ...payload.new } : p));
-      if (payload.eventType === "INSERT") return [...prev, payload.new];
-      if (payload.eventType === "DELETE") return prev.filter((p) => p.id !== payload.old.id);
-      return prev;
-    });
+    const concernsMandataire = payload.new?.mandataire_id === profile.id || payload.old?.mandataire_id === profile.id;
+    const concernsMandant    = payload.new?.mandant_id    === profile.id || payload.old?.mandant_id    === profile.id;
+    if (!concernsMandataire && !concernsMandant) return;
+
+    if (concernsMandataire) {
+      setPouvoirs((prev) => {
+        if (payload.eventType === "INSERT") {
+          // N'afficher que les pouvoirs vivants (actifs ou en attente de fin)
+          if (payload.new?.statut === "cancelled" || payload.new?.statut === "archived") return prev;
+          return [...prev, payload.new];
+        }
+        if (payload.eventType === "UPDATE") {
+          // Retirer les pouvoirs devenus terminés (cancelled OU archived par trigger N+1)
+          if (payload.new?.statut === "cancelled" || payload.new?.statut === "archived")
+            return prev.filter((p) => p.id !== payload.new.id);
+          // Merger pour préserver les champs joints (mandant) absents du payload realtime
+          return prev.map((p) => p.id === payload.new.id ? { ...p, ...payload.new } : p);
+        }
+        if (payload.eventType === "DELETE") return prev.filter((p) => p.id !== payload.old.id);
+        return prev;
+      });
+    }
+
+    if (concernsMandant) {
+      if (payload.eventType === "INSERT") {
+        // Le mandataire vient d'accepter : INSERT n'a pas les données jointes (mandataire).
+        // On recharge pour récupérer le nom/prénom du mandataire.
+        if (payload.new?.statut !== "cancelled" && payload.new?.statut !== "archived") {
+          pouvoirService.fetchDonne(agSession.id, profile.id)
+            .then(({ data }) => setPouvoirDonne(data ?? null));
+        }
+      }
+      if (payload.eventType === "UPDATE") {
+        // Pouvoir révoqué, archivé ou annulé → plus de délégation
+        if (["cancelled", "archived"].includes(payload.new?.statut)) {
+          setPouvoirDonne(null);
+        } else {
+          // scheduled_stop, pending_activation → active : mettre à jour l'objet local
+          setPouvoirDonne((prev) => prev?.id === payload.new.id ? { ...prev, ...payload.new } : prev);
+        }
+      }
+      if (payload.eventType === "DELETE") setPouvoirDonne(null);
+    }
   });
 
   useRealtime("votes", (payload) => {
@@ -104,18 +147,40 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
     });
   });
 
+  // Recalcule le poids de vote dynamique dès qu'une résolution passe en_cours.
+  // get_voting_weight filtre les pouvoirs par leur plage [start_resolution, end_resolution]
+  // et retourne les mandants réellement actifs pour cette résolution précise.
+  useEffect(() => {
+    if (!agSession?.id || pouvoirDonne) return; // mandant n'a pas de poids à calculer
+    const activeResolution = resolutions.find((r) => r.statut === "en_cours");
+    if (!activeResolution) { setVotingWeight(null); return; }
+    pouvoirService.getVotingWeight(profile.id, activeResolution.id)
+      .then(({ data }) => setVotingWeight(data ?? null));
+  }, [resolutions, agSession?.id, profile.id, pouvoirDonne]);
+
   const handleVote = async (resolutionId, choix) => {
     if (pouvoirDonne) return;
     const resolution = resolutions.find((r) => r.id === resolutionId);
     if (resolution?.statut === "termine") return;
 
+    // Pour un vote sur la résolution en_cours, on utilise les mandants calculés dynamiquement
+    // par get_voting_weight (respect des plages [start, end]). Pour vote anticipé, fallback
+    // sur les pouvoirs actifs/scheduled_stop de la liste locale.
+    const mandantsForThisResolution = (
+      resolution?.statut === "en_cours" && votingWeight?.mandants?.length
+        ? votingWeight.mandants
+        : pouvoirs
+            .filter((p) => p.statut === "active" || p.statut === "scheduled_stop")
+            .map((p) => p.mandant)
+            .filter(Boolean)
+    );
+
     const ops = [
       voteService.upsertAndReturn(profile.id, resolutionId, choix, profile.tantiemes),
-      ...pouvoirs.flatMap((pouvoir) => {
-        const mandant = pouvoir.mandant;
-        if (!mandant) return [];
-        // Si le mandant a fixé une instruction, son vote est déjà enregistré directement — on ne cascade pas
-        if (pouvoir.votes_imposes?.[resolutionId]) return [];
+      ...mandantsForThisResolution.flatMap((mandant) => {
+        const pouvoir = pouvoirs.find((p) => p.mandant?.id === mandant.id || p.mandant_id === mandant.id);
+        // Si le mandant a fixé une instruction, son vote est déjà enregistré directement
+        if (pouvoir?.votes_imposes?.[resolutionId]) return [];
         return [voteService.upsert(mandant.id, resolutionId, choix, mandant.tantiemes)];
       }),
     ];
@@ -170,15 +235,75 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   const handleAcceptPouvoir = async () => {
     if (!pendingToken) return;
     setAcceptingPouvoir(true);
-    const { error } = await pouvoirService.create(pendingToken.mandant_id, profile.id, agSession.id);
+    setQuotaError(null);
+
+    // Pré-validation quota art. 22 côté frontend (le trigger DB bloque aussi, mais on veut un message lisible)
+    const { data: quota } = await pouvoirService.checkQuota(profile.id, agSession.id, pendingToken.mandant_id);
+    if (quota && !quota.allowed) {
+      setQuotaError(quota.detail);
+      await auditLogsService.logQuotaViolation(agSession.id, profile.id, quota.detail);
+      setAcceptingPouvoir(false);
+      return;
+    }
+
+    const { data: created, error } = await pouvoirService.createWithChain(pendingToken.mandant_id, profile.id, agSession.id);
     if (!error) {
-      await pouvoirTokenService.markUsed(pendingToken.id);
+      await Promise.all([
+        pouvoirTokenService.markUsed(pendingToken.id),
+        logsAgService.insert(agSession.id, pendingToken.mandant_id, "pouvoir_donne", {
+          mandataire_id:     profile.id,
+          mandataire_prenom: profile.prenom,
+          mandataire_nom:    profile.nom,
+          statut:            created?.statut ?? "active",
+          chained_count:     created?.chained_count ?? 0,
+        }),
+      ]);
       sessionStorage.removeItem("pending_pouvoir_token");
       setPendingToken(null);
       const { data: pvrs } = await pouvoirService.fetchForMandataire(agSession.id, profile.id);
       setPouvoirs(pvrs || []);
+      if (created?.chained_count > 0) {
+        setChainInfo(`${created.chained_count} pouvoir(s) supplémentaire(s) transféré(s) par chaîne.`);
+      }
     }
     setAcceptingPouvoir(false);
+  };
+
+  const handleRevokePouvoir = async () => {
+    if (!pouvoirDonne) return;
+    setRevokingPouvoir(true);
+    const mandataireId  = pouvoirDonne.mandataire?.id;
+    const mandataireNom = `${pouvoirDonne.mandataire?.prenom ?? ""} ${pouvoirDonne.mandataire?.nom ?? ""}`.trim();
+
+    // N+1 seulement si un vote est activement en cours
+    const activeResolution = resolutions.find((r) => r.statut === "en_cours");
+
+    let error;
+    if (activeResolution) {
+      // handle_power_recovery applique la règle N+1 : le pouvoir reste valide pour ce vote
+      const { data: result, error: rpcErr } = await pouvoirService.handleRecovery(profile.id, activeResolution.id);
+      error = rpcErr ?? (result?.success === false ? new Error("RPC failed") : null);
+    } else {
+      // AG planifiée ou entre deux votes → annulation immédiate
+      const { error: delErr } = await pouvoirService.softDelete(pouvoirDonne.id);
+      error = delErr;
+    }
+
+    if (!error) {
+      await Promise.all([
+        logsAgService.insert(agSession?.id ?? null, profile.id, "pouvoir_revoque", {
+          mandataire_id:  mandataireId,
+          mandataire_nom: mandataireNom,
+          pivot_resolution: activeResolution?.id ?? null,
+        }),
+        auditLogsService.logPouvoirCancelledManual(
+          agSession?.id ?? null, profile.id, pouvoirDonne.id, mandataireId,
+        ),
+      ]);
+      setPouvoirDonne(null);
+      setConfirmRevoke(false);
+    }
+    setRevokingPouvoir(false);
   };
 
   const handleDeclinePouvoir = () => {
@@ -238,11 +363,46 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
         <div>
           <p className="text-xs text-zinc-500">Connecté en tant que</p>
           <p className="text-sm font-semibold text-zinc-900 dark:text-white">{profile.prenom} {profile.nom}</p>
-          <p className="text-xs text-zinc-500">{formatTantiemes(profile.tantiemes)} tantièmes</p>
-          {pouvoirs.length > 0 && (
-            <p className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">
-              Mandataire de {pouvoirs.map((p) => `${p.mandant?.prenom} ${p.mandant?.nom}`).join(", ")}
-            </p>
+          {votingWeight ? (
+            <div>
+              <p className="text-xs text-zinc-500">
+                <span className="font-semibold text-zinc-800 dark:text-zinc-100">
+                  {formatTantiemes(votingWeight.total_tantiemes)}
+                </span>{" "}tantièmes portés
+                {votingWeight.mandants_count > 0 && (
+                  <span className="text-blue-500 dark:text-blue-400">
+                    {" "}({formatTantiemes(votingWeight.own_tantiemes)} propres + {formatTantiemes(votingWeight.mandants_tantiemes)} délégués)
+                  </span>
+                )}
+              </p>
+              {votingWeight.mandants_count > 0 && (
+                <p className="text-xs text-blue-500 dark:text-blue-400 mt-0.5">
+                  Mandataire de {votingWeight.mandants.map((m) => `${m.prenom} ${m.nom}`).join(", ")}
+                </p>
+              )}
+            </div>
+          ) : (
+            <>
+              <p className="text-xs text-zinc-500">{formatTantiemes(profile.tantiemes)} tantièmes</p>
+              {pouvoirs.length > 0 && (
+                <div className="mt-0.5 space-y-0.5">
+                  {pouvoirs.filter((p) => p.statut === "active" || p.statut === "scheduled_stop").length > 0 && (
+                    <p className="text-xs text-blue-500 dark:text-blue-400">
+                      Mandataire de {pouvoirs
+                        .filter((p) => p.statut === "active" || p.statut === "scheduled_stop")
+                        .map((p) => `${p.mandant?.prenom} ${p.mandant?.nom}`).join(", ")}
+                    </p>
+                  )}
+                  {pouvoirs.filter((p) => p.statut === "pending_activation" || (p.statut === "active" && p.start_resolution_id)).length > 0 && (
+                    <p className="text-xs text-orange-500 dark:text-orange-400">
+                      En attente : {pouvoirs
+                        .filter((p) => p.statut === "pending_activation" || (p.statut === "active" && p.start_resolution_id))
+                        .map((p) => `${p.mandant?.prenom} ${p.mandant?.nom}`).join(", ")}
+                    </p>
+                  )}
+                </div>
+              )}
+            </>
           )}
         </div>
         <button onClick={onLogout} className="p-2 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors">
@@ -266,13 +426,27 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
                 </p>
               </div>
             </div>
+            {/* Erreur quota art. 22 */}
+            {quotaError && (
+              <div className="bg-red-500/10 border border-red-200 dark:border-red-800/50 rounded-xl px-3 py-2 text-xs text-red-700 dark:text-red-400 leading-relaxed">
+                <span className="font-semibold block mb-0.5">Refus — Art. 22, loi du 10/07/1965</span>
+                {quotaError}
+              </div>
+            )}
+            {/* Info transfert en chaîne */}
+            {chainInfo && (
+              <div className="bg-blue-500/10 border border-blue-200 dark:border-blue-800/50 rounded-xl px-3 py-2 text-xs text-blue-700 dark:text-blue-400 leading-relaxed">
+                <span className="font-semibold block mb-0.5">Transfert en chaîne effectué</span>
+                {chainInfo}
+              </div>
+            )}
             <div className="flex gap-2">
               <button
                 onClick={handleAcceptPouvoir}
                 disabled={acceptingPouvoir}
                 className="flex-1 bg-blue-600 hover:bg-blue-500 text-white text-sm font-medium py-2 rounded-xl transition-colors disabled:opacity-50"
               >
-                {acceptingPouvoir ? "Enregistrement..." : "Accepter"}
+                {acceptingPouvoir ? "Vérification..." : "Accepter"}
               </button>
               <button
                 onClick={handleDeclinePouvoir}
@@ -294,13 +468,53 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
               {/* En-tête */}
               <div className="flex items-start gap-3 p-4">
                 <UserCheck size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-semibold text-zinc-900 dark:text-white">Pouvoir délégué</p>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-semibold text-zinc-900 dark:text-white">Pouvoir délégué</p>
+                    {pouvoirDonne.statut === "pending_activation" && (
+                      <span className="text-[10px] font-bold uppercase tracking-wide bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-1.5 py-0.5 rounded-full">
+                        En attente — effectif résolution suivante
+                      </span>
+                    )}
+                  </div>
                   <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
                     Vous avez donné votre pouvoir à{" "}
                     <span className="font-medium">{pouvoirDonne.mandataire?.prenom} {pouvoirDonne.mandataire?.nom}</span>.
-                    Vous ne pouvez plus voter directement.
+                    {pouvoirDonne.statut === "active"
+                      ? " Vous ne pouvez plus voter directement."
+                      : " Il sera actif dès la clôture du vote en cours."}
                   </p>
+                  {/* Révocation */}
+                  {!confirmRevoke ? (
+                    <button
+                      onClick={() => setConfirmRevoke(true)}
+                      className="mt-2 text-xs font-medium text-amber-700 dark:text-amber-400 underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200 transition-colors"
+                    >
+                      Récupérer mon pouvoir
+                    </button>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-2 flex-wrap">
+                      <p className="text-xs text-zinc-700 dark:text-zinc-300">
+                        Confirmer ? Les votes déjà émis par votre mandataire sont conservés.
+                      </p>
+                      <div className="flex gap-1.5">
+                        <button
+                          onClick={handleRevokePouvoir}
+                          disabled={revokingPouvoir}
+                          className="text-xs font-semibold px-3 py-1 rounded-lg bg-red-600 hover:bg-red-500 text-white transition-colors disabled:opacity-50"
+                        >
+                          {revokingPouvoir ? "…" : "Oui, récupérer"}
+                        </button>
+                        <button
+                          onClick={() => setConfirmRevoke(false)}
+                          disabled={revokingPouvoir}
+                          className="text-xs font-semibold px-3 py-1 rounded-lg bg-zinc-100 dark:bg-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-600 transition-colors"
+                        >
+                          Annuler
+                        </button>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -445,19 +659,6 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
                 </div>
                 <h2 className="text-lg font-bold text-zinc-900 dark:text-white leading-tight">{resolution.titre}</h2>
                 {resolution.description && <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">{resolution.description}</p>}
-                {resolution.montant != null && resolution.montant !== -1 && (
-                  <div className="mt-2 flex flex-wrap gap-3">
-                    <span className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 px-2 py-1 rounded-lg font-mono font-medium">
-                      Total : {resolution.montant.toLocaleString("fr-FR")} €
-                    </span>
-                    {totalTantiemes > 0 && (
-                      <span className="text-xs bg-amber-500/10 text-amber-700 dark:text-amber-400 px-2 py-1 rounded-lg font-mono font-medium">
-                        Votre quote-part :{" "}
-                        {((profile.tantiemes / totalTantiemes) * resolution.montant).toLocaleString("fr-FR", { maximumFractionDigits: 2 })} €
-                      </span>
-                    )}
-                  </div>
-                )}
               </div>
 
               <DocumentsSection resolutionId={resolution.id} canManage={false} />
@@ -498,28 +699,6 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
             </div>
           );
         })}
-
-        {closedVotes.length > 0 && (
-          <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 space-y-3">
-            <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Votes clôturés</h3>
-            {closedVotes.map((v) => {
-              const res = resolutions.find((r) => r.id === v.resolution_id);
-              return (
-                <div key={v.id} className="flex items-center justify-between">
-                  <span className="text-zinc-500 dark:text-zinc-400 text-xs truncate max-w-[60%]">
-                    {res?.titre ?? `#${v.resolution_id.slice(0, 8)}`}
-                  </span>
-                  <span className={`text-xs font-medium px-2 py-0.5 rounded-full ${v.choix === "pour" ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400"
-                      : v.choix === "contre" ? "bg-red-500/20 text-red-600 dark:text-red-400"
-                        : "bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400"
-                    }`}>
-                    {v.choix.toUpperCase()}
-                  </span>
-                </div>
-              );
-            })}
-          </div>
-        )}
       </main>
 
       {/* Modal lien de pouvoir */}

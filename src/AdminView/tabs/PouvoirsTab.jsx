@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ChevronDown, ChevronUp, FilePen, Plus, Trash2, X } from "lucide-react";
+import { ChevronDown, ChevronUp, FilePen, Plus, Trash2, X, Clock, Archive } from "lucide-react";
 import { pouvoirService, voteService } from "../../services/db";
 import { formatTantiemes } from "../../hooks/formatTantieme";
 
@@ -47,7 +47,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
     }
     setSaving(true);
     setError(null);
-    const { error: err } = await pouvoirService.create(mandantId, mandataireId, agSessionId);
+    const { data, error: err } = await pouvoirService.createWithChain(mandantId, mandataireId, agSessionId);
     setSaving(false);
     if (err) {
       setError(err.message);
@@ -58,11 +58,33 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
   };
 
   const handleDelete = async (id) => {
-    if (!confirm("Supprimer ce pouvoir ?")) return;
+    if (!confirm("Annuler ce pouvoir ? La ligne sera conservée dans l'historique (audit trail).")) return;
     setDeletingId(id);
-    await pouvoirService.delete(id);
+    await pouvoirService.softDelete(id);
     setDeletingId(null);
     onUpdate();
+  };
+
+  const statutBadge = (p) => {
+    if (p.statut === "scheduled_stop")
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-orange-100 dark:bg-orange-900/30 text-orange-700 dark:text-orange-400 px-1.5 py-0.5 rounded-full">
+          <Clock size={9} /> Fin prochaine résolution
+        </span>
+      );
+    if (p.statut === "archived" || p.statut === "cancelled")
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 px-1.5 py-0.5 rounded-full">
+          <Archive size={9} /> {p.statut === "cancelled" ? "Annulé" : "Archivé"}
+        </span>
+      );
+    if (p.statut === "pending_activation" || (p.statut === "active" && p.start_resolution_id))
+      return (
+        <span className="inline-flex items-center gap-1 text-[10px] font-bold uppercase tracking-wide bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-1.5 py-0.5 rounded-full">
+          <Clock size={9} /> En attente
+        </span>
+      );
+    return null;
   };
 
   const handleToggleExpand = (id, currentVotes) => {
@@ -157,7 +179,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
                   <div className="px-5 py-3 flex items-center gap-3">
                     {/* Mandant */}
                     <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
+                      <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-xs text-zinc-400 font-medium uppercase tracking-wide">Mandant</span>
                         <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
                           {mandant ? `${mandant.prenom} ${mandant.nom}` : "—"}
@@ -167,6 +189,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
                             {formatTantiemes(mandant.tantiemes)} tants.
                           </span>
                         )}
+                        {statutBadge(p)}
                       </div>
                       <div className="flex items-center gap-2 mt-0.5">
                         <span className="text-xs text-zinc-400">donne pouvoir à</span>

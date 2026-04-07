@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { Vote, ChevronRight, AlertCircle, ArrowLeft } from "lucide-react";
-import { coproprietaireService, agSessionService } from "../services/db";
+import { coproprietaireService, agSessionService, logsAgService } from "../services/db";
 
 export function CoproLogin({ onLogin, onBack = null }) {
   const [email, setEmail] = useState("");
@@ -36,8 +36,9 @@ export function CoproLogin({ onLogin, onBack = null }) {
       agSession = ag || null;
     }
 
-    // 3. Marquer présent
+    // 3. Marquer présent + logger la connexion
     await coproprietaireService.setPresence(data.id, true);
+    logsAgService.insert(agSession?.id ?? null, data.id, "connexion");
 
     localStorage.setItem("copro_profile", JSON.stringify(data));
     onLogin(data, agSession);
