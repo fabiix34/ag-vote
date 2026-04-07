@@ -6,8 +6,13 @@ import { ResolutionCard } from "../../ResolutionCard/ResolutionCard";
 import { PlaceholderEditor } from "../../ResolutionTemplates/PlaceholderEditor";
 import { applyValues, saveAsTemplate } from "../../ResolutionTemplates/templates";
 import { MAJORITY_RULE_OPTIONS } from "../../utils/voteMajorityCalculator";
+import { AlertModal } from "../../components/AlertModal";
 
 export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, agSessionId, canModifyAgenda, canEditResolution, canLaunchVote, showAnticipeResults, isReadOnly, onUpdate }) {
+  // --- État modal d'alerte ---
+  const [alertModal, setAlertModal] = useState(null);
+  const closeModal = () => setAlertModal(null);
+
   // --- États pour la Database (Modèles) ---
   const [dbModeles, setDbModeles] = useState([]);
   const [dbCategories, setDbCategories] = useState([]);
@@ -93,48 +98,82 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
       }
 
       resetForm();
-      onUpdate();
     } catch (err) {
       console.error("Erreur ajout résolution:", err);
-      alert("Erreur lors de l'ajout.");
+      setAlertModal({
+        title: "Erreur",
+        message: "Une erreur est survenue lors de l'ajout de la résolution.",
+        type: "error",
+        buttons: [{ label: "OK", variant: "primary", onClick: closeModal }],
+      });
     } finally {
       setIsSaving(false);
     }
   };
 
   // 4. Supprimer une résolution
-  const handleDeleteResolution = async (id) => {
-    if (!confirm("Supprimer cette résolution ?")) return;
-    await resolutionService.delete(id);
-    onUpdate();
+  const handleDeleteResolution = (id) => {
+    setAlertModal({
+      title: "Supprimer cette résolution ?",
+      type: "confirm",
+      buttons: [
+        { label: "Annuler", variant: "secondary", onClick: closeModal },
+        { label: "Supprimer", variant: "danger", onClick: async () => {
+          closeModal();
+          await resolutionService.delete(id);
+          onUpdate();
+        }},
+      ],
+    });
   };
 
-  const handleSaveAsTemplate = async () => {
-    // Sécurité : on ne sauvegarde pas un modèle vide
+  const handleSaveAsTemplate = () => {
     if (!newTitre.trim() || !rawDesc.trim()) {
-      alert("Le titre et la description sont requis pour créer un modèle.");
+      setAlertModal({
+        title: "Champs requis",
+        message: "Le titre et la description sont requis pour créer un modèle.",
+        type: "warning",
+        buttons: [{ label: "OK", variant: "primary", onClick: closeModal }],
+      });
       return;
     }
 
-    // Demander la catégorie à l'utilisateur
-    const category = prompt(
-      "Sous quelle catégorie souhaitez-vous enregistrer ce modèle ? (ex: Travaux, Comptabilité, Divers)",
-      "Divers"
-    );
+    setAlertModal({
+      title: "Sauvegarder comme modèle",
+      message: "Sous quelle catégorie souhaitez-vous enregistrer ce modèle ?",
+      type: "prompt",
+      input: { placeholder: "ex: Travaux, Comptabilité, Divers", defaultValue: "Divers" },
+      buttons: [
+        { label: "Annuler", variant: "secondary", onClick: closeModal },
+        { label: "Enregistrer", variant: "primary", onClick: (category) => {
+          if (!category?.trim()) return;
+          closeModal();
+          doSaveTemplate(category.trim());
+        }},
+      ],
+    });
+  };
 
-    if (!category) return; // Annule si l'utilisateur clique sur "Annuler"
-
-    setIsSaving(true); // Utilise ton état de chargement existant
+  const doSaveTemplate = async (category) => {
+    setIsSaving(true);
     try {
-      await saveAsTemplate(newTitre.trim(), rawDesc.trim(), category.trim());
-
-      // Rafraîchir la liste locale des modèles pour qu'il apparaisse dans le menu immédiatement
+      await saveAsTemplate(newTitre.trim(), rawDesc.trim(), category);
       const { data } = await templateService.fetchAll();
       setDbModeles(data);
-      alert("Modèle ajouté à la bibliothèque avec succès !");
+      setAlertModal({
+        title: "Modèle enregistré",
+        message: "Le modèle a été ajouté à la bibliothèque avec succès.",
+        type: "success",
+        buttons: [{ label: "OK", variant: "primary", onClick: closeModal }],
+      });
     } catch (error) {
       console.error("Erreur saveAsTemplate:", error);
-      alert("Erreur lors de l'enregistrement du modèle.");
+      setAlertModal({
+        title: "Erreur",
+        message: "Une erreur est survenue lors de l'enregistrement du modèle.",
+        type: "error",
+        buttons: [{ label: "OK", variant: "primary", onClick: closeModal }],
+      });
     } finally {
       setIsSaving(false);
     }
@@ -142,6 +181,15 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
 
   return (
     <div className="space-y-4">
+      <AlertModal
+        isOpen={!!alertModal}
+        onClose={closeModal}
+        title={alertModal?.title ?? ""}
+        message={alertModal?.message}
+        type={alertModal?.type}
+        buttons={alertModal?.buttons ?? []}
+        input={alertModal?.input ?? null}
+      />
       {/* --- FORMULAIRE D'AJOUT (masqué si AG terminée) --- */}
       {isReadOnly && (
         <div className="bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">

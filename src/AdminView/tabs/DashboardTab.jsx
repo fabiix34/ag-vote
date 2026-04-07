@@ -5,6 +5,7 @@ import { CoproprietairesTable } from "../../CoproprietairesTable/Coproprietaires
 
 export function DashboardTab({ coproprietaires, resolutions, votes, agSession, pouvoirs = [] }) {
   const presents = coproprietaires.filter((c) => c.presence);
+  const isEnCours = agSession?.statut === "en_cours";
 
   // Copros ayant déjà voté en anticipé (au moins une résolution)
   const idsAyantVoteAnticipe = agSession?.vote_anticipe_actif
@@ -29,10 +30,7 @@ export function DashboardTab({ coproprietaires, resolutions, votes, agSession, p
       {/* KPIs */}
       <div className="grid grid-cols-4 gap-4">
         {[
-          { label: "Copropriétaires", value: coproprietaires.length, sub: "total", color: "text-zinc-300" },
-          { label: "Présents", value: presents.length, sub: `${quorum}% des tantièmes (repr. inclus)`, color: "text-emerald-400" },
-          { label: "Résolutions", value: resolutions.length, sub: `${resolutions.filter(r => r.statut === "en_cours").length} en cours`, color: "text-blue-400" },
-          { label: "Votes exprimés", value: votes.length, sub: "total", color: "text-amber-400" },
+          { label: "Résolutions restantes", value: resolutions.filter(r => r.statut !== "termine").length, sub: `${resolutions.filter(r => r.statut === "en_cours").length} en cours`, color: "text-blue-400" },
         ].map((k) => (
           <div key={k.label} className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4">
             <p className="text-xs text-zinc-500 mb-1">{k.label}</p>
@@ -43,7 +41,7 @@ export function DashboardTab({ coproprietaires, resolutions, votes, agSession, p
       </div>
 
       {/* Quorum */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 space-y-2">
+      {isEnCours && <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 space-y-2">
         <div className="flex justify-between text-sm">
           <span className="text-zinc-600 dark:text-zinc-400 font-medium">
             Quorum (présents + représentés)
@@ -64,7 +62,7 @@ export function DashboardTab({ coproprietaires, resolutions, votes, agSession, p
           />
         </div>
         {quorum < 50 && <p className="text-xs text-amber-400">⚠ Quorum insuffisant pour délibérer (50% requis)</p>}
-      </div>
+      </div>}
 
       {/* Votes anticipés */}
       {agSession?.vote_anticipe_actif && idsAyantVoteAnticipe.length > 0 && (

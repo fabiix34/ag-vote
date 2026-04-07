@@ -1,6 +1,6 @@
 import { templateService } from '../services/db';
 
-const PLACEHOLDER_RE = /\{\{(\w+)\}\}/g;
+const PLACEHOLDER_RE = /\{\{([\w\u00C0-\u017F]+)\}\}/g;
 
 // --- Utilitaires (inchangés car ils traitent du texte brut) ---
 export function extractPlaceholders(text) {
@@ -40,11 +40,11 @@ export function splitByPlaceholders(text) {
 
 export function applyValues(text, values) {
   if (!text) return "";
-  return text.replace(/\{\{(\w+)\}\}/g, (match, key) => values[key]?.trim() || match);
+  return text.replace(/\{\{([\w\u00C0-\u017F]+)\}\}/g, (match, key) => values[key]?.trim() || match);
 }
 
 export function formatLabel(key) {
-  return key.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+  return key.replace(/_/g, ' ').split(' ').map(w => w ? w[0].toUpperCase() + w.slice(1) : w).join(' ');
 }
 
 // --- Fonctions Database ---

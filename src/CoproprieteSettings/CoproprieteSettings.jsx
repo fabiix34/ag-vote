@@ -16,9 +16,11 @@ import {
   Pencil,
   Check,
   X,
+  ArrowRight,
 } from "lucide-react";
 import { coproprietaireService, agSessionService, coproprieteService } from "../services/db";
 import { CoprosTab } from "../AdminView/tabs/CoprosTab";
+import { AlertModal } from "../components/AlertModal";
 
 const STATUS_INFO = {
   planifiee: {
@@ -38,8 +40,8 @@ const STATUS_INFO = {
   },
 };
 
-export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
-  const [tab, setTab] = useState("membres");
+export function CoproprieteSettings({ copropriete, onOpenAG, onBack }) {
+  const [tab, setTab] = useState("ag");
   const [coproprietaires, setCoproprietaires] = useState([]);
   const [agSessions, setAgSessions] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -48,6 +50,10 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
   const [showNewAG, setShowNewAG] = useState(false);
   const [newAGDate, setNewAGDate] = useState(new Date().toISOString().split("T")[0]);
   const [creatingAG, setCreatingAG] = useState(false);
+
+  // Confirm ordre du jour
+  const [confirmODJ, setConfirmODJ] = useState(false);
+  const [pendingAG, setPendingAG] = useState(null);
 
   // Édition nom copropriété
   const [editingNom, setEditingNom] = useState(false);
@@ -78,20 +84,10 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
     if (!error && data) {
       setAgSessions((prev) => [data, ...prev]);
       setShowNewAG(false);
+      setPendingAG(data);
+      setConfirmODJ(true);
     }
     setCreatingAG(false);
-  };
-
-  const startAG = async (ag) => {
-    if (ag.statut === "planifiee") {
-      const { error } = await agSessionService.updateStatut(ag.id, "en_cours");
-      if (!error) {
-        const { data } = await agSessionService.fetchById(ag.id);
-        if (data) onOpenAG(data);
-      }
-    } else {
-      onOpenAG(ag);
-    }
   };
 
   const handleSaveNom = async () => {
@@ -108,11 +104,31 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
   };
 
   const tabs = [
-    { id: "membres", label: "Copropriétaires", icon: Users },
     { id: "ag", label: "Assemblées générales", icon: Calendar },
+    { id: "membres", label: "Copropriétaires", icon: Users },
   ];
 
   return (
+    <>
+    <AlertModal
+      isOpen={confirmODJ}
+      onClose={() => setConfirmODJ(false)}
+      type="success"
+      title="AG créée avec succès"
+      message="Voulez-vous continuer vers la création de l'ordre du jour ?"
+      buttons={[
+        {
+          label: "Non, rester ici",
+          variant: "secondary",
+          onClick: () => setConfirmODJ(false),
+        },
+        {
+          label: "Oui, créer l'ordre du jour",
+          variant: "primary",
+          onClick: () => { setConfirmODJ(false); onOpenAG(pendingAG); },
+        },
+      ]}
+    />
     <div className="min-h-screen bg-[var(--bg)]">
       {/* Header */}
       <header className="bg-[var(--bg)] border-b border-zinc-200 dark:border-zinc-800 px-6 py-4">
@@ -167,8 +183,8 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
               key={t.id}
               onClick={() => setTab(t.id)}
               className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.id
-                  ? "border-emerald-500 text-emerald-500 dark:text-emerald-400"
-                  : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+                ? "border-emerald-500 text-emerald-500 dark:text-emerald-400"
+                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
                 }`}
             >
               <t.icon size={14} />
@@ -193,7 +209,7 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
                   {coproprietaires.length > 1 ? "s" : ""} enregistré
                   {coproprietaires.length > 1 ? "s" : ""}
                 </p>
-                <CoprosTab coproprietaires={coproprietaires} coproprieteId={copropriete.id} onSave={fetchCoproprietaires} onDelete={fetchCoproprietaires}/>
+                <CoprosTab coproprietaires={coproprietaires} coproprieteId={copropriete.id} onSave={fetchCoproprietaires} onDelete={fetchCoproprietaires} />
               </div>
             )}
 
@@ -300,8 +316,8 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
                               onClick={() => onOpenAG(ag)}
                               className="flex items-center gap-2 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 border border-zinc-200 dark:border-zinc-700 px-4 py-2 rounded-lg text-sm transition-colors"
                             >
-                              <Eye size={14} />
                               Accéder
+                              <ArrowRight size={14} />
                             </button>
                           </div>
                         </div>
@@ -315,5 +331,6 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
         )}
       </main>
     </div>
+    </>
   );
 }

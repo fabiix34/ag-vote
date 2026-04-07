@@ -104,6 +104,9 @@ export const coproprietaireService = {
   setPresence: (id, presence) =>
     supabase.from("coproprietaires").update({ presence }).eq("id", id),
 
+  resetAllPresence: (coproprieteId) =>
+    supabase.from("coproprietaires").update({ presence: false }).eq("copropriete_id", coproprieteId),
+
   delete: (id) =>
     supabase.from("coproprietaires").delete().eq("id", id),
 

@@ -94,7 +94,6 @@ function CoproprieteSettingsPage() {
   if (!syndic || !copropriete) return <PageLoader />;
   return (
     <CoproprieteSettings
-      syndic={syndic}
       copropriete={copropriete}
       onOpenAG={(ag) => navigate(`/ag/${ag.id}`)}
       onBack={() => navigate("/dashboard")}

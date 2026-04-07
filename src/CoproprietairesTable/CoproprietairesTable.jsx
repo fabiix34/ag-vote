@@ -3,6 +3,7 @@ import { UserPlus, Trash2, X, Upload, ChevronDown } from "lucide-react";
 import * as XLSX from "xlsx";
 import { coproprietaireService } from "../services/db";
 import { formatTantiemes } from "../hooks/formatTantieme";
+import { AlertModal } from "../components/AlertModal";
 
 const PAGE_SIZES = [10, 25, 50];
 const EMPTY_FORM = { nom: "", prenom: "", date_naissance: "", email: "", tantiemes: "" };
@@ -65,6 +66,8 @@ export function CoproprietairesTable({
 
   // --- Suppression ---
   const [deletingId, setDeletingId] = useState(null);
+  const [alertModal, setAlertModal] = useState(null);
+  const closeModal = () => setAlertModal(null);
 
   // ---- Filtrage & pagination ----
   const q = search.trim().toLowerCase();
@@ -174,13 +177,23 @@ export function CoproprietairesTable({
     }
   };
 
-  const handleDelete = async (e, c) => {
+  const handleDelete = (e, c) => {
     e.stopPropagation();
-    if (!confirm(`Supprimer ${c.prenom} ${c.nom} ? Cette action est irréversible.`)) return;
-    setDeletingId(c.id);
-    await coproprietaireService.delete(c.id);
-    setDeletingId(null);
-    onMutate?.();
+    setAlertModal({
+      title: `Supprimer ${c.prenom} ${c.nom} ?`,
+      message: "Cette action est irréversible.",
+      type: "confirm",
+      buttons: [
+        { label: "Annuler", variant: "secondary", onClick: closeModal },
+        { label: "Supprimer", variant: "danger", onClick: async () => {
+          closeModal();
+          setDeletingId(c.id);
+          await coproprietaireService.delete(c.id);
+          setDeletingId(null);
+          onMutate?.();
+        }},
+      ],
+    });
   };
 
   // ---- Colonnes ----
@@ -189,6 +202,15 @@ export function CoproprietairesTable({
 
   return (
     <>
+      <AlertModal
+        isOpen={!!alertModal}
+        onClose={closeModal}
+        title={alertModal?.title ?? ""}
+        message={alertModal?.message}
+        type={alertModal?.type}
+        buttons={alertModal?.buttons ?? []}
+        input={alertModal?.input ?? null}
+      />
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
         {/* Header */}
         <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex flex-wrap items-center gap-3">

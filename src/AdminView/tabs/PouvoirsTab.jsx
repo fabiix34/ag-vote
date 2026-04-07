@@ -2,6 +2,7 @@ import { useState } from "react";
 import { ChevronDown, ChevronUp, FilePen, Plus, Trash2, X, Clock, Archive } from "lucide-react";
 import { pouvoirService, voteService } from "../../services/db";
 import { formatTantiemes } from "../../hooks/formatTantieme";
+import { AlertModal } from "../../components/AlertModal";
 
 const CHOIX_OPTS = [
   { value: "", label: "— Laisse décider le mandataire —" },
@@ -20,6 +21,8 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
   const [editingVotes, setEditingVotes] = useState({}); // { pouvoirId: { resolutionId: choix } }
   const [savingVotes, setSavingVotes] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
+  const [alertModal, setAlertModal] = useState(null);
+  const closeModal = () => setAlertModal(null);
 
   // Copros qui n'ont pas encore donné de pouvoir dans cette AG
   const mandantsDisponibles = coproprietaires.filter(
@@ -57,12 +60,22 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
     }
   };
 
-  const handleDelete = async (id) => {
-    if (!confirm("Annuler ce pouvoir ? La ligne sera conservée dans l'historique (audit trail).")) return;
-    setDeletingId(id);
-    await pouvoirService.softDelete(id);
-    setDeletingId(null);
-    onUpdate();
+  const handleDelete = (id) => {
+    setAlertModal({
+      title: "Annuler ce pouvoir ?",
+      message: "La ligne sera conservée dans l'historique (audit trail).",
+      type: "confirm",
+      buttons: [
+        { label: "Annuler", variant: "secondary", onClick: closeModal },
+        { label: "Confirmer", variant: "danger", onClick: async () => {
+          closeModal();
+          setDeletingId(id);
+          await pouvoirService.softDelete(id);
+          setDeletingId(null);
+          onUpdate();
+        }},
+      ],
+    });
   };
 
   const statutBadge = (p) => {
@@ -136,6 +149,15 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
 
   return (
     <div className="space-y-4">
+      <AlertModal
+        isOpen={!!alertModal}
+        onClose={closeModal}
+        title={alertModal?.title ?? ""}
+        message={alertModal?.message}
+        type={alertModal?.type}
+        buttons={alertModal?.buttons ?? []}
+        input={alertModal?.input ?? null}
+      />
       {/* Header */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
         <div className="px-5 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
