@@ -391,6 +391,13 @@ export const templateService = {
       .insert([{ titre, description, categorie, is_custom: true }])
       .select(),
 
+  update: (id, titre, description, categorie) =>
+    supabase.from("resolution_templates")
+      .update({ titre, description, categorie })
+      .eq("id", id)
+      .select()
+      .single(),
+
   delete: (id) =>
     supabase.from("resolution_templates").delete().eq("id", id),
 };

@@ -7,7 +7,6 @@ import { useState, useEffect, useCallback } from "react";
 import {
   ArrowLeft,
   Users,
-  Upload,
   Calendar,
   Plus,
   Play,
@@ -20,7 +19,6 @@ import {
 } from "lucide-react";
 import { coproprietaireService, agSessionService, coproprieteService } from "../services/db";
 import { CoprosTab } from "../AdminView/tabs/CoprosTab";
-import { ImportTab } from "../AdminView/tabs/ImportTab";
 
 const STATUS_INFO = {
   planifiee: {
@@ -111,7 +109,6 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
 
   const tabs = [
     { id: "membres", label: "Copropriétaires", icon: Users },
-    { id: "import", label: "Import Excel", icon: Upload },
     { id: "ag", label: "Assemblées générales", icon: Calendar },
   ];
 
@@ -198,11 +195,6 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
                 </p>
                 <CoprosTab coproprietaires={coproprietaires} coproprieteId={copropriete.id} onSave={fetchCoproprietaires} onDelete={fetchCoproprietaires}/>
               </div>
-            )}
-
-            {/* Onglet Import */}
-            {tab === "import" && (
-              <ImportTab coproprieteId={copropriete.id} onImport={fetchAll} />
             )}
 
             {/* Onglet AG */}

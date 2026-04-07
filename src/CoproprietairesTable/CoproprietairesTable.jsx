@@ -1,5 +1,6 @@
-import { useState } from "react";
-import { UserPlus, Trash2, X } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
+import { UserPlus, Trash2, X, Upload, ChevronDown } from "lucide-react";
+import * as XLSX from "xlsx";
 import { coproprietaireService } from "../services/db";
 import { formatTantiemes } from "../hooks/formatTantieme";
 
@@ -42,6 +43,25 @@ export function CoproprietairesTable({
   const [form, setForm] = useState(EMPTY_FORM);
   const [saving, setSaving] = useState(false);
   const [modalError, setModalError] = useState(null);
+
+  // --- Menu choix ajout ---
+  const [showAddMenu, setShowAddMenu] = useState(false);
+  const addMenuRef = useRef(null);
+
+  useEffect(() => {
+    if (!showAddMenu) return;
+    const handler = (e) => {
+      if (!addMenuRef.current?.contains(e.target)) setShowAddMenu(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showAddMenu]);
+
+  // --- Import Excel ---
+  const [showImport, setShowImport] = useState(false);
+  const [importPreview, setImportPreview] = useState([]);
+  const [importing, setImporting] = useState(false);
+  const fileRef = useRef(null);
 
   // --- Suppression ---
   const [deletingId, setDeletingId] = useState(null);
@@ -118,6 +138,42 @@ export function CoproprietairesTable({
     }
   };
 
+  // ---- Handlers import Excel ----
+  const handleFile = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (evt) => {
+      const wb = XLSX.read(evt.target.result, { type: "binary" });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const data = XLSX.utils.sheet_to_json(ws);
+      const normalized = data
+        .map((row) => ({
+          nom: row["Nom"] || row["nom"] || "",
+          prenom: row["Prénom"] || row["prenom"] || "",
+          email: row["Email"] || row["email"] || "",
+          date_naissance: String(row["DateNaissance"] || row["date_naissance"] || ""),
+          tantiemes: parseInt(row["Tantièmes"] || row["tantiemes"] || 0),
+        }))
+        .filter((r) => r.email);
+      setImportPreview(normalized);
+    };
+    reader.readAsBinaryString(file);
+  };
+
+  const handleImport = async () => {
+    setImporting(true);
+    const rows = importPreview.map((r) => ({ ...r, copropriete_id: coproprieteId }));
+    const { error } = await coproprietaireService.upsertMany(rows);
+    setImporting(false);
+    if (!error) {
+      setShowImport(false);
+      setImportPreview([]);
+      fileRef.current.value = "";
+      onMutate?.();
+    }
+  };
+
   const handleDelete = async (e, c) => {
     e.stopPropagation();
     if (!confirm(`Supprimer ${c.prenom} ${c.nom} ? Cette action est irréversible.`)) return;
@@ -157,13 +213,34 @@ export function CoproprietairesTable({
             ))}
           </select>
           {canAdd && (
-            <button
-              onClick={handleOpenAdd}
-              className="flex items-center gap-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1.5 rounded-lg transition-colors"
-            >
-              <UserPlus size={13} />
-              Ajouter
-            </button>
+            <div ref={addMenuRef} className="relative">
+              <button
+                onClick={() => setShowAddMenu((v) => !v)}
+                className="flex items-center gap-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <UserPlus size={13} />
+                Ajouter
+                <ChevronDown size={11} />
+              </button>
+              {showAddMenu && (
+                <div className="absolute right-0 top-full mt-1 z-20 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-700 rounded-xl shadow-lg overflow-hidden w-48">
+                  <button
+                    onClick={() => { setShowAddMenu(false); handleOpenAdd(); }}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                  >
+                    <UserPlus size={14} className="text-emerald-600" />
+                    Saisie manuelle
+                  </button>
+                  <button
+                    onClick={() => { setShowAddMenu(false); setShowImport(true); }}
+                    className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors border-t border-zinc-100 dark:border-zinc-800"
+                  >
+                    <Upload size={14} className="text-emerald-600" />
+                    Importer Excel
+                  </button>
+                </div>
+              )}
+            </div>
           )}
         </div>
 
@@ -265,6 +342,76 @@ export function CoproprietairesTable({
           </div>
         )}
       </div>
+
+      {/* Modal import Excel */}
+      {showImport && (
+        <div
+          className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+          onClick={() => { setShowImport(false); setImportPreview([]); }}
+        >
+          <div
+            className="bg-white dark:bg-zinc-900 rounded-2xl p-6 w-full max-w-lg shadow-xl space-y-4"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center justify-between">
+              <h3 className="font-semibold text-zinc-900 dark:text-white">Import Excel</h3>
+              <button
+                onClick={() => { setShowImport(false); setImportPreview([]); }}
+                className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300 transition-colors"
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <div
+              onClick={() => fileRef.current?.click()}
+              className="border-2 border-dashed border-zinc-300 dark:border-zinc-600 rounded-xl p-6 text-center cursor-pointer hover:border-emerald-500 dark:hover:border-emerald-500 transition-colors group"
+            >
+              <Upload className="mx-auto mb-2 text-zinc-400 group-hover:text-emerald-500 transition-colors" size={28} />
+              <p className="text-sm text-zinc-600 dark:text-zinc-400">Cliquer pour choisir un fichier Excel</p>
+              <p className="text-xs text-zinc-400 mt-1">Colonnes : Nom, Prénom, Email, DateNaissance (DD/MM/YYYY), Tantièmes</p>
+              <input ref={fileRef} type="file" accept=".xlsx,.xls,.csv" className="hidden" onChange={handleFile} />
+            </div>
+
+            {importPreview.length > 0 && (
+              <>
+                <p className="text-sm text-zinc-600 dark:text-zinc-400">
+                  {importPreview.length} copropriétaire{importPreview.length > 1 ? "s" : ""} détecté{importPreview.length > 1 ? "s" : ""}
+                </p>
+                <div className="max-h-48 overflow-y-auto rounded-lg border border-zinc-200 dark:border-zinc-700">
+                  <table className="w-full text-xs">
+                    <thead className="bg-zinc-50 dark:bg-zinc-800 sticky top-0">
+                      <tr>
+                        {["Nom", "Prénom", "Email", "Naissance", "Tantièmes"].map((h) => (
+                          <th key={h} className="px-3 py-2 text-left text-zinc-500 dark:text-zinc-400 font-medium">{h}</th>
+                        ))}
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {importPreview.map((r, i) => (
+                        <tr key={i} className="border-t border-zinc-100 dark:border-zinc-800">
+                          <td className="px-3 py-2 text-zinc-800 dark:text-zinc-200">{r.nom}</td>
+                          <td className="px-3 py-2 text-zinc-800 dark:text-zinc-200">{r.prenom}</td>
+                          <td className="px-3 py-2 text-zinc-500 dark:text-zinc-400">{r.email}</td>
+                          <td className="px-3 py-2 text-zinc-500 dark:text-zinc-400">{r.date_naissance}</td>
+                          <td className="px-3 py-2 text-emerald-600 dark:text-emerald-400 font-mono">{formatTantiemes(r.tantiemes)}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
+                <button
+                  onClick={handleImport}
+                  disabled={importing}
+                  className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white rounded-lg font-medium text-sm transition-colors disabled:opacity-50"
+                >
+                  {importing ? "Import en cours…" : `Importer ${importPreview.length} copropriétaire${importPreview.length > 1 ? "s" : ""}`}
+                </button>
+              </>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Modal ajout / édition */}
       {showModal && (
