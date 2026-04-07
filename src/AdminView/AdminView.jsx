@@ -24,10 +24,12 @@ import { ResolutionsTab } from "./tabs/ResolutionsTab";
 import { PouvoirsTab } from "./tabs/PouvoirsTab";
 import { PVGenerator } from "../PVGenerator/PVGenerator";
 import { Loader } from "../Loader/Loader";
+import { AlertModal } from "../components/AlertModal";
 
 export function AdminView({ copropriete, agSession: initialAgSession, onBack, onEndAG }) {
   const [agSession, setAgSession] = useState(initialAgSession);
-  const [tab, setTab] = useState("dashboard");
+  const initConstruction = initialAgSession.statut === "planifiee" && !initialAgSession.vote_anticipe_actif;
+  const [tab, setTab] = useState(initConstruction ? "resolutions" : "dashboard");
   const [coproprietaires, setCoproprietaires] = useState([]);
   const [resolutions, setResolutions] = useState([]);
   const [votes, setVotes] = useState([]);
@@ -38,9 +40,17 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
   const [ending, setEnding] = useState(false);
   const [starting, setStarting] = useState(false);
   const [togglingAnticipe, setTogglingAnticipe] = useState(false);
+  const [alertModal, setAlertModal] = useState(null);
+  const closeModal = () => setAlertModal(null);
 
   const isPlanifiee = agSession.statut === "planifiee";
   const isTerminee = agSession.statut === "terminee";
+  const isConstruction = isPlanifiee && !agSession.vote_anticipe_actif;
+  const isAnticipe = agSession.vote_anticipe_actif;
+  const isLive = !isPlanifiee && !isTerminee && !agSession.vote_anticipe_actif;
+
+  const showDashboard = isLive || isTerminee;
+  const showPouvoirs = isAnticipe || isLive || isTerminee;
 
   const fetchAll = useCallback(async () => {
     const [{ data: copros }, { data: resols }, { data: pvrs }] = await Promise.all([
@@ -135,19 +145,37 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
     setStarting(false);
   };
 
-  const handleEndAG = async () => {
-    if (!confirm("Terminer l'AG ? Toutes les résolutions en cours seront clôturées.")) return;
-    setEnding(true);
-    await resolutionService.closeAllActive(agSession.id);
-    await agSessionService.terminate(agSession.id);
-    setEnding(false);
-    onEndAG();
+  const handleEndAG = () => {
+    setAlertModal({
+      title: "Terminer l'AG ?",
+      message: "Toutes les résolutions en cours seront clôturées.",
+      type: "confirm",
+      buttons: [
+        { label: "Annuler", variant: "secondary", onClick: closeModal },
+        { label: "Terminer l'AG", variant: "danger", onClick: async () => {
+          closeModal();
+          setEnding(true);
+          await resolutionService.closeAllActive(agSession.id);
+          await agSessionService.terminate(agSession.id);
+          await coproprietaireService.resetAllPresence(copropriete.id);
+          setEnding(false);
+          onEndAG();
+        }},
+      ],
+    });
   };
 
+  // Redirige vers un onglet valide si la phase change
+  useEffect(() => {
+    if (!showDashboard && tab === "dashboard") setTab("resolutions");
+    if (!showPouvoirs && tab === "pouvoirs") setTab("resolutions");
+    if (showDashboard && isLive && tab === "resolutions") setTab("dashboard");
+  }, [agSession.statut, agSession.vote_anticipe_actif]); // eslint-disable-line react-hooks/exhaustive-deps
+
   const tabs = [
-    { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "resolutions", label: "Résolutions", icon: Vote },
-    { id: "pouvoirs", label: "Pouvoirs", icon: FileSignature, badge: pouvoirs.length || null },
+    ...(showDashboard ? [{ id: "dashboard", label: "Dashboard", icon: BarChart3 }] : []),
+    { id: "resolutions", label: isConstruction ? "Ordre du jour" : "Résolutions", icon: Vote },
+    ...(showPouvoirs ? [{ id: "pouvoirs", label: "Pouvoirs", icon: FileSignature, badge: pouvoirs.length || null }] : []),
   ];
 
   const dateStr = agSession.date_ag
@@ -156,6 +184,15 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
 
   return (
     <div className="min-h-screen bg-[var(--bg)] text-zinc-900 dark:text-white">
+      <AlertModal
+        isOpen={!!alertModal}
+        onClose={closeModal}
+        title={alertModal?.title ?? ""}
+        message={alertModal?.message}
+        type={alertModal?.type}
+        buttons={alertModal?.buttons ?? []}
+        input={alertModal?.input ?? null}
+      />
       {/* Header */}
       <header className="bg-[var(--bg)] border-b border-zinc-200 dark:border-zinc-800 px-6 py-3 flex items-center justify-between gap-4">
         <div className="flex items-center gap-3 min-w-0">
