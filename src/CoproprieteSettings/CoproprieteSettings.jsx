@@ -18,7 +18,7 @@ import {
   Check,
   X,
 } from "lucide-react";
-import { supabase } from "../App";
+import { coproprietaireService, agSessionService, coproprieteService } from "../services/db";
 import { CoprosTab } from "../AdminView/tabs/CoprosTab";
 import { ImportTab } from "../AdminView/tabs/ImportTab";
 
@@ -43,7 +43,6 @@ const STATUS_INFO = {
 export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
   const [tab, setTab] = useState("membres");
   const [coproprietaires, setCoproprietaires] = useState([]);
-  const [votes, setVotes] = useState([]);
   const [agSessions, setAgSessions] = useState([]);
   const [loading, setLoading] = useState(true);
 
@@ -58,25 +57,15 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
   const [savingNom, setSavingNom] = useState(false);
 
   const fetchCoproprietaires = async () => {
-    const { data, error } = await supabase
-      .from("coproprietaires")
-      .select("*")
-      .eq("copropriete_id", copropriete.id)
-      .order("nom");
+    const { data, error } = await coproprietaireService.fetchByCopropriete(copropriete.id);
     if (!error) setCoproprietaires(data || []);
   };
 
   const fetchAll = useCallback(async () => {
-    const [, { data: vts }, { data: ags }] = await Promise.all([
+    const [, { data: ags }] = await Promise.all([
       fetchCoproprietaires(),
-      supabase.from("votes").select("*"),
-      supabase
-        .from("ag_sessions")
-        .select("*")
-        .eq("copropriete_id", copropriete.id)
-        .order("created_at", { ascending: false }),
+      agSessionService.fetchByCopropriete(copropriete.id),
     ]);
-    setVotes(vts || []);
     setAgSessions(ags || []);
     setLoading(false);
   }, [copropriete.id]);
@@ -87,15 +76,7 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
 
   const handleCreateAG = async () => {
     setCreatingAG(true);
-    const { data, error } = await supabase
-      .from("ag_sessions")
-      .insert({
-        copropriete_id: copropriete.id,
-        statut: "planifiee",
-        date_ag: newAGDate || null,
-      })
-      .select()
-      .single();
+    const { data, error } = await agSessionService.create(copropriete.id, newAGDate);
     if (!error && data) {
       setAgSessions((prev) => [data, ...prev]);
       setShowNewAG(false);
@@ -105,15 +86,10 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
 
   const startAG = async (ag) => {
     if (ag.statut === "planifiee") {
-      // Démarrer l'AG
-      const { data, error } = await supabase
-        .from("ag_sessions")
-        .update({ statut: "en_cours" })
-        .eq("id", ag.id)
-        .select()
-        .single();
-      if (!error && data) {
-        onOpenAG(data);
+      const { error } = await agSessionService.updateStatut(ag.id, "en_cours");
+      if (!error) {
+        const { data } = await agSessionService.fetchById(ag.id);
+        if (data) onOpenAG(data);
       }
     } else {
       onOpenAG(ag);
@@ -127,7 +103,7 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
       return;
     }
     setSavingNom(true);
-    await supabase.from("coproprietes").update({ nom: nomValue.trim() }).eq("id", copropriete.id);
+    await coproprieteService.updateNom(copropriete.id, nomValue.trim());
     copropriete.nom = nomValue.trim();
     setEditingNom(false);
     setSavingNom(false);
@@ -220,7 +196,7 @@ export function CoproprieteSettings({ syndic, copropriete, onOpenAG, onBack }) {
                   {coproprietaires.length > 1 ? "s" : ""} enregistré
                   {coproprietaires.length > 1 ? "s" : ""}
                 </p>
-                <CoprosTab coproprietaires={coproprietaires} votes={votes} coproprieteId={copropriete.id} onSave={fetchCoproprietaires} onDelete={fetchCoproprietaires}/>
+                <CoprosTab coproprietaires={coproprietaires} coproprieteId={copropriete.id} onSave={fetchCoproprietaires} onDelete={fetchCoproprietaires}/>
               </div>
             )}
 

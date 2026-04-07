@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from "react";
 import { Shield, Plus, Building2, ArrowRight, LogOut, Users } from "lucide-react";
-import { supabase } from "../App";
+import { coproprieteService } from "../services/db";
 
 export function SyndicDashboard({ syndic, onSelectCopropriete, onLogout }) {
   const [coproprietes, setCoproprietes] = useState([]);
@@ -19,11 +19,7 @@ export function SyndicDashboard({ syndic, onSelectCopropriete, onLogout }) {
   }, []);
 
   const fetchCoproprietes = async () => {
-    const { data } = await supabase
-      .from("coproprietes")
-      .select("id, nom, adresse, created_at, coproprietaires(count)")
-      .eq("syndic_id", syndic.id)
-      .order("created_at", { ascending: false });
+    const { data } = await coproprieteService.fetchBySyndic(syndic.id);
     setCoproprietes(data || []);
     setLoading(false);
   };
@@ -31,15 +27,7 @@ export function SyndicDashboard({ syndic, onSelectCopropriete, onLogout }) {
   const handleCreate = async () => {
     if (!newNom.trim()) return;
     setCreating(true);
-    const { data, error } = await supabase
-      .from("coproprietes")
-      .insert({
-        syndic_id: syndic.id,
-        nom: newNom.trim(),
-        adresse: newAdresse.trim() || null,
-      })
-      .select()
-      .single();
+    const { data, error } = await coproprieteService.create(syndic.id, newNom.trim(), newAdresse.trim());
     if (!error && data) {
       setCoproprietes((prev) => [{ ...data, coproprietaires: [{ count: 0 }] }, ...prev]);
       setNewNom("");

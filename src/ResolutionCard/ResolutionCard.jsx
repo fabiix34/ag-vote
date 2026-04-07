@@ -1,7 +1,7 @@
 
 import { useState } from "react";
 import { CheckCircle, Edit3, Hand, Play, Trash2 } from "lucide-react";
-import { supabase } from "../App";
+import { voteService, resolutionService } from "../services/db";
 import { StatutBadge } from "../StatutBadge/StatutBadge";
 import { ResultatsResolution } from "../ResultatsResolution/ResultatsResolution";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
@@ -23,8 +23,8 @@ export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = 
 
     const existingVote = votes.find((v) => v.coproprietaire_id === copro.id && v.resolution_id === resolution.id);
     const mainVoteOp = existingVote?.id
-      ? supabase.from("votes").update({ choix, tantiemes_poids: copro.tantiemes }).eq("id", existingVote.id)
-      : supabase.from("votes").insert({ coproprietaire_id: copro.id, resolution_id: resolution.id, choix, tantiemes_poids: copro.tantiemes });
+      ? voteService.update(existingVote.id, choix, copro.tantiemes)
+      : voteService.insert(copro.id, resolution.id, choix, copro.tantiemes);
 
     const voteOps = [mainVoteOp];
 
@@ -33,14 +33,9 @@ export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = 
     for (const pouvoir of mandants) {
       const mandant = coproprietaires.find((c) => c.id === pouvoir.mandant_id);
       if (!mandant) continue;
-      // Le mandant peut avoir imposé un vote spécifique pour cette résolution
-      const choixMandant = pouvoir.votes_imposes?.[resolution.id] || choix;
-      voteOps.push(
-        supabase.from("votes").upsert(
-          { coproprietaire_id: mandant.id, resolution_id: resolution.id, choix: choixMandant, tantiemes_poids: mandant.tantiemes },
-          { onConflict: "coproprietaire_id,resolution_id" }
-        )
-      );
+      // Si le mandant a fixé une instruction, son vote est déjà enregistré directement — on ne cascade pas
+      if (pouvoir.votes_imposes?.[resolution.id]) continue;
+      voteOps.push(voteService.upsert(mandant.id, resolution.id, choix, mandant.tantiemes));
     }
 
     await Promise.all(voteOps);
@@ -49,19 +44,14 @@ export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = 
 
   const handleStatutChange = async (statut) => {
     setLoading(true);
-    // Si on lance un vote, mettre les autres en attente
-    if (statut === "en_cours") {
-      await supabase.from("resolutions")
-        .update({ statut: "en_attente" })
-        .eq("statut", "en_cours");
-    }
-    await supabase.from("resolutions").update({ statut }).eq("id", resolution.id);
+    if (statut === "en_cours") await resolutionService.pauseOthers();
+    await resolutionService.updateStatut(resolution.id, statut);
     setLoading(false);
     onUpdate();
   };
 
   const handleSave = async () => {
-    await supabase.from("resolutions").update({ titre, description }).eq("id", resolution.id);
+    await resolutionService.update(resolution.id, { titre, description });
     setEditing(false);
     onUpdate();
   };

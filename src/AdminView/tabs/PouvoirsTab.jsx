@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { ChevronDown, ChevronUp, FilePen, Plus, Trash2, X } from "lucide-react";
-import { supabase } from "../../App";
+import { pouvoirService, voteService } from "../../services/db";
 import { formatTantiemes } from "../../hooks/formatTantieme";
 
 const CHOIX_OPTS = [
@@ -10,7 +10,7 @@ const CHOIX_OPTS = [
   { value: "abstention", label: "Abstention" },
 ];
 
-export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionId, onUpdate }) {
+export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionId, isReadOnly = false, onUpdate }) {
   const [showModal, setShowModal] = useState(false);
   const [mandantId, setMandantId] = useState("");
   const [mandataireId, setMandataireId] = useState("");
@@ -47,12 +47,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
     }
     setSaving(true);
     setError(null);
-    const { error: err } = await supabase.from("pouvoirs").insert({
-      mandant_id: mandantId,
-      mandataire_id: mandataireId,
-      ag_session_id: agSessionId,
-      votes_imposes: {},
-    });
+    const { error: err } = await pouvoirService.create(mandantId, mandataireId, agSessionId);
     setSaving(false);
     if (err) {
       setError(err.message);
@@ -65,7 +60,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
   const handleDelete = async (id) => {
     if (!confirm("Supprimer ce pouvoir ?")) return;
     setDeletingId(id);
-    await supabase.from("pouvoirs").delete().eq("id", id);
+    await pouvoirService.delete(id);
     setDeletingId(null);
     onUpdate();
   };
@@ -94,10 +89,25 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
 
   const handleSaveVotesImposes = async (pouvoirId) => {
     setSavingVotes(pouvoirId);
-    await supabase
-      .from("pouvoirs")
-      .update({ votes_imposes: editingVotes[pouvoirId] || {} })
-      .eq("id", pouvoirId);
+    const pouvoir = pouvoirs.find((p) => p.id === pouvoirId);
+    const newVotesImposes = editingVotes[pouvoirId] || {};
+
+    const mandant = copro(pouvoir.mandant_id);
+
+    // Persiste les instructions sur le pouvoir
+    const ops = [
+      pouvoirService.updateVotesImposes(pouvoirId, newVotesImposes),
+    ];
+
+    // Pour chaque instruction définie, enregistre immédiatement le vote du mandant
+    // afin qu'il ne puisse plus être écrasé par la cascade du mandataire
+    for (const [resolutionId, choix] of Object.entries(newVotesImposes)) {
+      if (choix && mandant) {
+        ops.push(voteService.upsert(mandant.id, resolutionId, choix, mandant.tantiemes));
+      }
+    }
+
+    await Promise.all(ops);
     setSavingVotes(null);
     onUpdate();
   };
@@ -112,16 +122,18 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
               Pouvoirs de vote ({pouvoirs.length})
             </h2>
             <p className="text-xs text-zinc-500 mt-0.5">
-              Délégations enregistrées pour cette AG
+              {isReadOnly ? "L'AG est démarrée — les pouvoirs ne peuvent plus être modifiés." : "Délégations enregistrées pour cette AG"}
             </p>
           </div>
-          <button
-            onClick={handleOpenModal}
-            className="flex items-center gap-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1.5 rounded-lg transition-colors"
-          >
-            <Plus size={13} />
-            Enregistrer un pouvoir
-          </button>
+          {!isReadOnly && (
+            <button
+              onClick={handleOpenModal}
+              className="flex items-center gap-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1.5 rounded-lg transition-colors"
+            >
+              <Plus size={13} />
+              Enregistrer un pouvoir
+            </button>
+          )}
         </div>
 
         {pouvoirs.length === 0 ? (
@@ -171,22 +183,26 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
                           {nbImposes} vote{nbImposes > 1 ? "s" : ""} imposé{nbImposes > 1 ? "s" : ""}
                         </span>
                       )}
-                      <button
-                        onClick={() => handleToggleExpand(p.id, p.votes_imposes)}
-                        className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                        title="Configurer les votes imposés"
-                      >
-                        <FilePen size={12} />
-                        {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                      </button>
-                      <button
-                        onClick={() => handleDelete(p.id)}
-                        disabled={deletingId === p.id}
-                        className="text-zinc-400 hover:text-red-500 dark:hover:text-red-400 transition-colors disabled:opacity-40 p-1"
-                        title="Supprimer ce pouvoir"
-                      >
-                        <Trash2 size={14} />
-                      </button>
+                      {!isReadOnly && (
+                        <>
+                          <button
+                            onClick={() => handleToggleExpand(p.id, p.votes_imposes)}
+                            className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                            title="Configurer les votes imposés"
+                          >
+                            <FilePen size={12} />
+                            {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                          </button>
+                          <button
+                            onClick={() => handleDelete(p.id)}
+                            disabled={deletingId === p.id}
+                            className="text-zinc-400 hover:text-red-500 dark:hover:text-red-400 transition-colors disabled:opacity-40 p-1"
+                            title="Supprimer ce pouvoir"
+                          >
+                            <Trash2 size={14} />
+                          </button>
+                        </>
+                      )}
                     </div>
                   </div>
 
@@ -202,20 +218,34 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
                         ) : (
                           resolutions.map((r) => {
                             const current = editingVotes[p.id]?.[r.id] || "";
+                            // Instruction déjà sauvegardée en DB → verrouillée
+                            const locked = !!p.votes_imposes?.[r.id];
                             return (
                               <div key={r.id} className="flex items-center gap-3">
                                 <span className="flex-1 text-xs text-zinc-700 dark:text-zinc-300 truncate">
                                   {r.titre}
                                 </span>
-                                <select
-                                  value={current}
-                                  onChange={(e) => handleVoteImpose(p.id, r.id, e.target.value)}
-                                  className="text-xs px-2 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                >
-                                  {CHOIX_OPTS.map((o) => (
-                                    <option key={o.value} value={o.value}>{o.label}</option>
-                                  ))}
-                                </select>
+                                {locked ? (
+                                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${
+                                    p.votes_imposes[r.id] === "pour"
+                                      ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
+                                      : p.votes_imposes[r.id] === "contre"
+                                      ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+                                      : "bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400"
+                                  }`}>
+                                    {p.votes_imposes[r.id].charAt(0).toUpperCase() + p.votes_imposes[r.id].slice(1)} — voté
+                                  </span>
+                                ) : (
+                                  <select
+                                    value={current}
+                                    onChange={(e) => handleVoteImpose(p.id, r.id, e.target.value)}
+                                    className="text-xs px-2 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
+                                  >
+                                    {CHOIX_OPTS.map((o) => (
+                                      <option key={o.value} value={o.value}>{o.label}</option>
+                                    ))}
+                                  </select>
+                                )}
                               </div>
                             );
                           })

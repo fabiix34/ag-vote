@@ -6,7 +6,6 @@ import { useState, useEffect, useCallback } from "react";
 import {
   BarChart3,
   FileSignature,
-  Users,
   Vote,
   Shield,
   Wifi,
@@ -18,7 +17,7 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useRealtime } from "../hooks/useRealtime";
-import { supabase } from "../App";
+import { coproprietaireService, resolutionService, pouvoirService, voteService, agSessionService } from "../services/db";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CoprosTab } from "./tabs/CoprosTab";
 import { ResolutionsTab } from "./tabs/ResolutionsTab";
@@ -45,24 +44,13 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
 
   const fetchAll = useCallback(async () => {
     const [{ data: copros }, { data: resols }, { data: pvrs }] = await Promise.all([
-      supabase
-        .from("coproprietaires")
-        .select("*")
-        .eq("copropriete_id", copropriete.id)
-        .order("nom"),
-      supabase
-        .from("resolutions")
-        .select("*")
-        .eq("ag_session_id", agSession.id)
-        .order("ordre"),
-      supabase
-        .from("pouvoirs")
-        .select("*")
-        .eq("ag_session_id", agSession.id),
+      coproprietaireService.fetchByCopropriete(copropriete.id),
+      resolutionService.fetchByAgSession(agSession.id),
+      pouvoirService.fetchByAgSession(agSession.id),
     ]);
     const resolutionIds = (resols || []).map((r) => r.id);
     const { data: vts } = resolutionIds.length
-      ? await supabase.from("votes").select("*").in("resolution_id", resolutionIds)
+      ? await voteService.fetchByResolutions(resolutionIds)
       : { data: [] };
     setCoproprietaires(copros || []);
     setResolutions(resols || []);
@@ -127,27 +115,22 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
   const handleToggleAnticipe = async () => {
     setTogglingAnticipe(true);
     const newVal = !agSession.vote_anticipe_actif;
-    // Activer le vote anticipé passe l'AG en_cours ; désactiver la remet en planifiee
     const newStatut = newVal ? "en_cours" : "planifiee";
-    await supabase
-      .from("ag_sessions")
-      .update({ vote_anticipe_actif: newVal, statut: newStatut })
-      .eq("id", agSession.id);
+    await agSessionService.updateAnticipe(agSession.id, newVal, newStatut);
     setAgSession((prev) => ({ ...prev, vote_anticipe_actif: newVal, statut: newStatut }));
     setTogglingAnticipe(false);
   };
 
   const handleStartAG = async () => {
     setStarting(true);
-    await supabase.from("ag_sessions").update({ statut: "en_cours" }).eq("id", agSession.id);
+    await agSessionService.updateStatut(agSession.id, "en_cours");
     setAgSession((prev) => ({ ...prev, statut: "en_cours" }));
     setStarting(false);
   };
 
   const handleOpenSession = async () => {
     setStarting(true);
-    // Bascule du mode anticipé vers la séance live : désactive le vote anticipé
-    await supabase.from("ag_sessions").update({ vote_anticipe_actif: false }).eq("id", agSession.id);
+    await agSessionService.disableAnticipe(agSession.id);
     setAgSession((prev) => ({ ...prev, vote_anticipe_actif: false }));
     setStarting(false);
   };
@@ -155,22 +138,14 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
   const handleEndAG = async () => {
     if (!confirm("Terminer l'AG ? Toutes les résolutions en cours seront clôturées.")) return;
     setEnding(true);
-    await supabase
-      .from("resolutions")
-      .update({ statut: "termine" })
-      .eq("ag_session_id", agSession.id)
-      .eq("statut", "en_cours");
-    await supabase
-      .from("ag_sessions")
-      .update({ statut: "terminee" })
-      .eq("id", agSession.id);
+    await resolutionService.closeAllActive(agSession.id);
+    await agSessionService.terminate(agSession.id);
     setEnding(false);
     onEndAG();
   };
 
   const tabs = [
     { id: "dashboard", label: "Dashboard", icon: BarChart3 },
-    { id: "copros", label: "Copropriétaires", icon: Users },
     { id: "resolutions", label: "Résolutions", icon: Vote },
     { id: "pouvoirs", label: "Pouvoirs", icon: FileSignature, badge: pouvoirs.length || null },
   ];
@@ -352,7 +327,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
               />
             )}
             {tab === "copros" && (
-              <CoprosTab coproprietaires={coproprietaires} votes={votes} coproprieteId={copropriete.id} />
+              <CoprosTab coproprietaires={coproprietaires} votes={votes} coproprieteId={copropriete.id} isReadOnly={true} />
             )}
             {tab === "resolutions" && (
               <ResolutionsTab
@@ -375,6 +350,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
                 coproprietaires={coproprietaires}
                 resolutions={resolutions}
                 agSessionId={agSession.id}
+                isReadOnly={!isPlanifiee}
                 onUpdate={fetchAll}
               />
             )}

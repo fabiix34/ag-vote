@@ -3,7 +3,8 @@
 // COMPOSANT : Documents d'une résolution
 // ============================================================
 import { useState, useRef, useEffect, useCallback } from "react";
-import { supabase } from "../App";
+import { supabase } from "../lib/supabase";
+import { documentService } from "../services/db";
 import { Paperclip, Plus, AlertCircle, FileText, ExternalLink, Trash2 } from "lucide-react";
 
 export function DocumentsSection({ resolutionId, canManage }) {
@@ -13,11 +14,7 @@ export function DocumentsSection({ resolutionId, canManage }) {
   const fileRef = useRef();
 
   const fetchDocs = useCallback(async () => {
-    const { data } = await supabase
-      .from("documents")
-      .select("*")
-      .eq("resolution_id", resolutionId)
-      .order("created_at");
+    const { data } = await documentService.fetchByResolution(resolutionId);
     const rows = data || [];
     if (rows.length > 0) {
       const { data: signed } = await supabase.storage
@@ -45,7 +42,7 @@ export function DocumentsSection({ resolutionId, canManage }) {
       .from("resolution-docs")
       .upload(path, file);
     if (!storageError) {
-      const { error: dbError } = await supabase.from("documents").insert({ resolution_id: resolutionId, nom: file.name, path });
+      const { error: dbError } = await documentService.create(resolutionId, file.name, path);
       if (dbError) {
         await supabase.storage.from("resolution-docs").remove([path]);
         setUploadError(dbError.message);
@@ -62,7 +59,7 @@ export function DocumentsSection({ resolutionId, canManage }) {
 
   const handleDelete = async (doc) => {
     await supabase.storage.from("resolution-docs").remove([doc.path]);
-    await supabase.from("documents").delete().eq("id", doc.id);
+    await documentService.delete(doc.id);
     fetchDocs();
   };
 

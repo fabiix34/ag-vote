@@ -1,17 +1,14 @@
 import { useState } from 'react';
 import { FileText, Loader2 } from 'lucide-react';
 import { pdf } from '@react-pdf/renderer';
-import { supabase } from '../App';
+import { supabase } from '../lib/supabase';
+import { documentService } from '../services/db';
 import { PVDocument } from './PVDocument';
 
 async function fetchDocuments(resolutionIds) {
   if (resolutionIds.length === 0) return {};
 
-  const { data } = await supabase
-    .from('documents')
-    .select('*')
-    .in('resolution_id', resolutionIds)
-    .order('created_at');
+  const { data } = await documentService.fetchByResolutions(resolutionIds);
 
   if (!data?.length) return {};
 

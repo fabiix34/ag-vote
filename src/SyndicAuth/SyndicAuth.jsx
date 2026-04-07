@@ -4,7 +4,8 @@
 
 import { useState } from "react";
 import { Shield, ArrowLeft, Eye, EyeOff } from "lucide-react";
-import { supabase } from "../App";
+import { supabase } from "../lib/supabase";
+import { syndicService } from "../services/db";
 
 export function SyndicAuth({ onSuccess, onBack = null }) {
   const [mode, setMode] = useState("login"); // 'login' | 'register'
@@ -42,11 +43,7 @@ export function SyndicAuth({ onSuccess, onBack = null }) {
         setLoading(false);
         return;
       }
-      const { data: syndic, error: syndicErr } = await supabase
-        .from("syndics")
-        .select("*")
-        .eq("id", data.user.id)
-        .single();
+      const { data: syndic, error: syndicErr } = await syndicService.fetch(data.user.id);
       if (syndicErr || !syndic) {
         setError("Compte syndic introuvable. Vérifiez vos identifiants.");
         await supabase.auth.signOut();
@@ -65,16 +62,7 @@ export function SyndicAuth({ onSuccess, onBack = null }) {
         setLoading(false);
         return;
       }
-      const { data: syndic, error: insertErr } = await supabase
-        .from("syndics")
-        .insert({
-          id: data.user.id,
-          email: email.trim(),
-          nom: nom.trim(),
-          prenom: prenom.trim(),
-        })
-        .select()
-        .single();
+      const { data: syndic, error: insertErr } = await syndicService.create(data.user.id, email.trim(), nom.trim(), prenom.trim());
       if (insertErr) {
         setError("Erreur lors de la création du profil syndic");
         setLoading(false);

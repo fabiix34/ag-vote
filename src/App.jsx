@@ -1,7 +1,8 @@
 import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from "react-router-dom";
-import { createClient } from "@supabase/supabase-js";
 import { useDomain } from "./hooks/useDomain";
+import { supabase } from "./lib/supabase";
+import { syndicService, coproprieteService, agSessionService, coproprietaireService } from "./services/db";
 import { SyndicAuth } from "./SyndicAuth/SyndicAuth";
 import { SyndicDashboard } from "./SyndicDashboard/SyndicDashboard";
 import { CoproprieteSettings } from "./CoproprieteSettings/CoproprieteSettings";
@@ -9,12 +10,7 @@ import { AdminView } from "./AdminView/AdminView";
 import { CoproLogin } from "./CoproLogin/CoproLogin";
 import { CoproVoteView } from "./CoproVoteView/CoproVoteView";
 
-// ============================================================
-// CONFIGURATION SUPABASE
-// ============================================================
-const supabaseUrl = import.meta.env.VITE_SUPABASE_URL || "https://YOUR_PROJECT.supabase.co";
-const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY || "YOUR_ANON_KEY";
-export const supabase = createClient(supabaseUrl, supabaseKey);
+export { supabase };
 
 // ============================================================
 // UTILITAIRES
@@ -30,7 +26,7 @@ function PageLoader() {
 async function getSyndicFromSession() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
-  const { data } = await supabase.from("syndics").select("*").eq("id", session.user.id).single();
+  const { data } = await syndicService.fetch(session.user.id);
   return data || null;
 }
 
@@ -87,7 +83,7 @@ function CoproprieteSettingsPage() {
     const load = async () => {
       const s = await getSyndicFromSession();
       if (!s) { navigate("/", { replace: true }); return; }
-      const { data: cp } = await supabase.from("coproprietes").select("*").eq("id", id).single();
+      const { data: cp } = await coproprieteService.fetchById(id);
       if (!cp) { navigate("/dashboard", { replace: true }); return; }
       setSyndic(s);
       setCopropriete(cp);
@@ -116,11 +112,7 @@ function AdminViewPage() {
     const load = async () => {
       const s = await getSyndicFromSession();
       if (!s) { navigate("/", { replace: true }); return; }
-      const { data: ag } = await supabase
-        .from("ag_sessions")
-        .select("*, coproprietes(*)")
-        .eq("id", id)
-        .single();
+      const { data: ag } = await agSessionService.fetchWithCopropriete(id);
       if (!ag) { navigate("/dashboard", { replace: true }); return; }
       setAgSession(ag);
       setCopropriete(ag.coproprietes);
@@ -175,14 +167,7 @@ function CoproVotePage() {
       const p = JSON.parse(stored);
       setProfile(p);
       if (p.copropriete_id) {
-        const { data: ag } = await supabase
-          .from("ag_sessions")
-          .select("*")
-          .eq("copropriete_id", p.copropriete_id)
-          .in("statut", ["planifiee", "en_cours"])
-          .order("date_ag", { ascending: false })
-          .limit(1)
-          .single();
+        const { data: ag } = await agSessionService.fetchActive(p.copropriete_id);
         setAgSession(ag || null);
       }
       setReady(true);
@@ -197,7 +182,7 @@ function CoproVotePage() {
       agSession={agSession}
       onLogout={async () => {
         if (profile) {
-          await supabase.from("coproprietaires").update({ presence: false }).eq("id", profile.id);
+          await coproprietaireService.setPresence(profile.id, false);
         }
         localStorage.removeItem("copro_profile");
         navigate("/", { replace: true });

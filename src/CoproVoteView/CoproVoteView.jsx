@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, MinusCircle, LogOut, Vote, Check, Share2, Copy, UserCheck, X } from "lucide-react";
-import { supabase } from "../App";
+import { resolutionService, voteService, coproprietaireService, pouvoirService, pouvoirTokenService } from "../services/db";
 import { useRealtime } from "../hooks/useRealtime";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
@@ -20,6 +20,9 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   const [generatingPouvoir, setGeneratingPouvoir] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Instructions de vote imposées au mandataire
+  const [savingVoteImpose, setSavingVoteImpose] = useState(null); // resolution_id en cours de sauvegarde
+
   // Acceptation d'un pouvoir reçu via lien
   const [pendingToken, setPendingToken] = useState(null);
   const [acceptingPouvoir, setAcceptingPouvoir] = useState(false);
@@ -27,18 +30,11 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   useEffect(() => {
     if (!agSession?.id) return;
     Promise.all([
-      supabase.from("resolutions").select("*").eq("ag_session_id", agSession.id).order("ordre"),
-      supabase.from("votes").select("*").eq("coproprietaire_id", profile.id),
-      supabase.from("coproprietaires").select("tantiemes").eq("copropriete_id", profile.copropriete_id),
-      supabase.from("pouvoirs")
-        .select("*, mandant:coproprietaires!mandant_id(id,nom,prenom,tantiemes)")
-        .eq("ag_session_id", agSession.id)
-        .eq("mandataire_id", profile.id),
-      supabase.from("pouvoirs")
-        .select("*, mandataire:coproprietaires!mandataire_id(id,nom,prenom)")
-        .eq("ag_session_id", agSession.id)
-        .eq("mandant_id", profile.id)
-        .maybeSingle(),
+      resolutionService.fetchByAgSession(agSession.id),
+      voteService.fetchByCopro(profile.id),
+      coproprietaireService.fetchTantiemes(profile.copropriete_id),
+      pouvoirService.fetchForMandataire(agSession.id, profile.id),
+      pouvoirService.fetchDonne(agSession.id, profile.id),
     ]).then(([{ data: resols }, { data: myVotes }, { data: copros }, { data: pvrs }, { data: pdonne }]) => {
       setResolutions(resols || []);
       setVotes(myVotes || []);
@@ -52,14 +48,7 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   useEffect(() => {
     const token = sessionStorage.getItem("pending_pouvoir_token");
     if (!token || !agSession?.id) return;
-    supabase
-      .from("pouvoir_tokens")
-      .select("*, mandant:coproprietaires!mandant_id(id,nom,prenom)")
-      .eq("token", token)
-      .eq("ag_session_id", agSession.id)
-      .eq("used", false)
-      .single()
-      .then(({ data }) => {
+    pouvoirTokenService.fetchPending(token, agSession.id).then(({ data }) => {
         if (data && data.mandant_id !== profile.id) {
           setPendingToken(data);
         } else {
@@ -67,6 +56,20 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
         }
       });
   }, [agSession?.id, profile.id]);
+
+  // Mise à jour des pouvoirs en temps réel — notamment pour récupérer les votes_imposes
+  // fixés par le mandant depuis son interface, sans quoi la vérification de cascade serait obsolète.
+  useRealtime("pouvoirs", (payload) => {
+    if (payload.new?.mandataire_id !== profile.id && payload.old?.mandataire_id !== profile.id) return;
+    setPouvoirs((prev) => {
+      if (payload.eventType === "UPDATE")
+        // On merge pour préserver le champ mandant (jointure) absent du payload realtime
+        return prev.map((p) => (p.id === payload.new.id ? { ...p, ...payload.new } : p));
+      if (payload.eventType === "INSERT") return [...prev, payload.new];
+      if (payload.eventType === "DELETE") return prev.filter((p) => p.id !== payload.old.id);
+      return prev;
+    });
+  });
 
   useRealtime("votes", (payload) => {
     if (payload.new?.coproprietaire_id !== profile.id && payload.old?.coproprietaire_id !== profile.id) return;
@@ -107,18 +110,13 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
     if (resolution?.statut === "termine") return;
 
     const ops = [
-      supabase.from("votes").upsert(
-        { coproprietaire_id: profile.id, resolution_id: resolutionId, choix, tantiemes_poids: profile.tantiemes },
-        { onConflict: "coproprietaire_id,resolution_id" }
-      ).select().single(),
+      voteService.upsertAndReturn(profile.id, resolutionId, choix, profile.tantiemes),
       ...pouvoirs.flatMap((pouvoir) => {
         const mandant = pouvoir.mandant;
         if (!mandant) return [];
-        const choixMandant = pouvoir.votes_imposes?.[resolutionId] || choix;
-        return [supabase.from("votes").upsert(
-          { coproprietaire_id: mandant.id, resolution_id: resolutionId, choix: choixMandant, tantiemes_poids: mandant.tantiemes },
-          { onConflict: "coproprietaire_id,resolution_id" }
-        )];
+        // Si le mandant a fixé une instruction, son vote est déjà enregistré directement — on ne cascade pas
+        if (pouvoir.votes_imposes?.[resolutionId]) return [];
+        return [voteService.upsert(mandant.id, resolutionId, choix, mandant.tantiemes)];
       }),
     ];
 
@@ -141,19 +139,9 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
     if (!agSession?.id) return;
     setGeneratingPouvoir(true);
     // Récupère le token existant ou en crée un nouveau
-    let { data: existing } = await supabase
-      .from("pouvoir_tokens")
-      .select("token")
-      .eq("mandant_id", profile.id)
-      .eq("ag_session_id", agSession.id)
-      .single();
-
+    let { data: existing } = await pouvoirTokenService.fetchExisting(profile.id, agSession.id);
     if (!existing) {
-      const { data: inserted } = await supabase
-        .from("pouvoir_tokens")
-        .insert({ mandant_id: profile.id, ag_session_id: agSession.id })
-        .select("token")
-        .single();
+      const { data: inserted } = await pouvoirTokenService.create(profile.id, agSession.id);
       existing = inserted;
     }
 
@@ -182,21 +170,12 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   const handleAcceptPouvoir = async () => {
     if (!pendingToken) return;
     setAcceptingPouvoir(true);
-    const { error } = await supabase.from("pouvoirs").insert({
-      mandant_id: pendingToken.mandant_id,
-      mandataire_id: profile.id,
-      ag_session_id: agSession.id,
-    });
+    const { error } = await pouvoirService.create(pendingToken.mandant_id, profile.id, agSession.id);
     if (!error) {
-      await supabase.from("pouvoir_tokens").update({ used: true }).eq("id", pendingToken.id);
+      await pouvoirTokenService.markUsed(pendingToken.id);
       sessionStorage.removeItem("pending_pouvoir_token");
       setPendingToken(null);
-      // Rafraîchit les pouvoirs
-      const { data: pvrs } = await supabase
-        .from("pouvoirs")
-        .select("*, mandant:coproprietaires!mandant_id(id,nom,prenom,tantiemes)")
-        .eq("ag_session_id", agSession.id)
-        .eq("mandataire_id", profile.id);
+      const { data: pvrs } = await pouvoirService.fetchForMandataire(agSession.id, profile.id);
       setPouvoirs(pvrs || []);
     }
     setAcceptingPouvoir(false);
@@ -205,6 +184,39 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
   const handleDeclinePouvoir = () => {
     sessionStorage.removeItem("pending_pouvoir_token");
     setPendingToken(null);
+  };
+
+  // Met à jour l'instruction de vote imposée au mandataire pour une résolution donnée
+  // ET enregistre immédiatement le vote du mandant dans la table votes.
+  // choix === null signifie "vote libre" : supprime l'instruction et le vote direct.
+  const handleSetVoteImpose = async (resolutionId, choix) => {
+    if (!pouvoirDonne?.id) return;
+    setSavingVoteImpose(resolutionId);
+
+    const updated = { ...(pouvoirDonne.votes_imposes || {}) };
+    if (choix === null) {
+      delete updated[resolutionId];
+    } else {
+      updated[resolutionId] = choix;
+    }
+
+    const ops = [
+      pouvoirService.updateVotesImposes(pouvoirDonne.id, updated),
+    ];
+
+    if (choix !== null) {
+      // Enregistre le vote directement — le mandataire ne cascadera pas pour ce mandant
+      ops.push(voteService.upsert(profile.id, resolutionId, choix, profile.tantiemes));
+    } else {
+      // Supprime le vote direct pour que le mandataire puisse à nouveau voter librement pour ce mandant
+      ops.push(voteService.delete(profile.id, resolutionId));
+    }
+
+    const [{ error }] = await Promise.all(ops);
+    if (!error) {
+      setPouvoirDonne((prev) => ({ ...prev, votes_imposes: updated }));
+    }
+    setSavingVoteImpose(null);
   };
 
   const voteButtons = [
@@ -272,20 +284,112 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
           </div>
         )}
 
-        {/* Bannière pouvoir donné */}
-        {pouvoirDonne && (
-          <div className="bg-amber-500/10 border border-amber-200 dark:border-amber-800/50 rounded-2xl p-4 flex items-start gap-3">
-            <UserCheck size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-semibold text-zinc-900 dark:text-white">Pouvoir délégué</p>
-              <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
-                Vous avez donné votre pouvoir à{" "}
-                <span className="font-medium">{pouvoirDonne.mandataire?.prenom} {pouvoirDonne.mandataire?.nom}</span>.
-                Vous ne pouvez plus voter directement.
-              </p>
+        {/* Bannière pouvoir donné + instructions de vote */}
+        {pouvoirDonne && (() => {
+          // Résolutions pour lesquelles on peut encore donner des instructions (non clôturées)
+          const instructables = resolutions.filter((r) => r.statut !== "termine");
+          return (
+            <div className="bg-amber-500/10 border border-amber-200 dark:border-amber-800/50 rounded-2xl overflow-hidden">
+
+              {/* En-tête */}
+              <div className="flex items-start gap-3 p-4">
+                <UserCheck size={18} className="text-amber-500 flex-shrink-0 mt-0.5" />
+                <div>
+                  <p className="text-sm font-semibold text-zinc-900 dark:text-white">Pouvoir délégué</p>
+                  <p className="text-xs text-zinc-600 dark:text-zinc-400 mt-0.5">
+                    Vous avez donné votre pouvoir à{" "}
+                    <span className="font-medium">{pouvoirDonne.mandataire?.prenom} {pouvoirDonne.mandataire?.nom}</span>.
+                    Vous ne pouvez plus voter directement.
+                  </p>
+                </div>
+              </div>
+
+              {/* Instructions par résolution */}
+              {instructables.length > 0 && (
+                <div className="border-t border-amber-200 dark:border-amber-800/50 px-4 py-3 space-y-3">
+                  <div>
+                    <p className="text-xs font-semibold text-zinc-700 dark:text-zinc-300 uppercase tracking-wide">
+                      Instructions pour votre mandataire
+                    </p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">
+                      Indiquez votre souhait par résolution. Sans instruction, votre mandataire vote librement.
+                    </p>
+                  </div>
+
+                  {instructables.map((resolution) => {
+                    const imposed = pouvoirDonne.votes_imposes?.[resolution.id] ?? null;
+                    const isSaving = savingVoteImpose === resolution.id;
+
+                    return (
+                      <div key={resolution.id} className="bg-white/60 dark:bg-zinc-800/40 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 leading-tight flex-1 min-w-0 truncate">
+                            {resolution.titre}
+                          </p>
+                          {resolution.statut === "en_cours" && (
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded-full shrink-0">
+                              En cours
+                            </span>
+                          )}
+                        </div>
+
+                        <div className="flex gap-1.5 flex-wrap">
+                          {[
+                            {
+                              choix: "pour",
+                              label: "Pour",
+                              active: "bg-emerald-600 text-white ring-2 ring-emerald-400/60",
+                              idle: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-800/40",
+                            },
+                            {
+                              choix: "contre",
+                              label: "Contre",
+                              active: "bg-red-600 text-white ring-2 ring-red-400/60",
+                              idle: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/40",
+                            },
+                            {
+                              choix: "abstention",
+                              label: "Abst.",
+                              active: "bg-zinc-600 text-white ring-2 ring-zinc-400/60",
+                              idle: "bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-600",
+                            },
+                            {
+                              choix: null,
+                              label: "Libre",
+                              active: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 ring-2 ring-blue-300/60",
+                              idle: "bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700",
+                            },
+                          ].map(({ choix, label, active, idle }) => {
+                            const isSelected = imposed === choix;
+                            return (
+                              <button
+                                key={choix ?? "libre"}
+                                disabled={isSaving}
+                                onClick={() => handleSetVoteImpose(resolution.id, choix)}
+                                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all disabled:opacity-50 ${isSelected ? active : idle}`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                          {isSaving && (
+                            <span className="text-[10px] text-zinc-400 self-center italic">Enregistrement…</span>
+                          )}
+                        </div>
+
+                        {imposed && imposed !== null && (
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                            Votre mandataire votera <span className="font-semibold text-zinc-700 dark:text-zinc-300">{imposed.toUpperCase()}</span> pour cette résolution.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          );
+        })()}
 
         {/* Bouton Donner mon pouvoir */}
         {agSession && !pouvoirDonne && (

@@ -1,6 +1,7 @@
 import { ResultatsResolution } from "../../ResultatsResolution/ResultatsResolution";
 import { formatTantiemes } from "../../hooks/formatTantieme";
 import { calcPourcentage } from "../../hooks/calcPourcentage";
+import { CoproprietairesTable } from "../../CoproprietairesTable/CoproprietairesTable";
 
 export function DashboardTab({ coproprietaires, resolutions, votes, agSession, pouvoirs = [] }) {
   const presents = coproprietaires.filter((c) => c.presence);
@@ -102,26 +103,13 @@ export function DashboardTab({ coproprietaires, resolutions, votes, agSession, p
         </div>
       ))}
 
-      {/* Liste des présents */}
-      <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
-        <div className="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
-          <h3 className="font-medium text-zinc-900 dark:text-white text-sm">Présents en séance</h3>
-          <span className="text-xs text-zinc-500">{presents.length} connectés</span>
-        </div>
-        <div className="divide-y divide-zinc-100 dark:divide-zinc-800 max-h-64 overflow-y-auto">
-          {presents.length === 0 ? (
-            <p className="px-4 py-8 text-center text-zinc-500 text-sm">Aucun copropriétaire connecté</p>
-          ) : presents.map((c) => (
-            <div key={c.id} className="px-4 py-2.5 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <div className="w-2 h-2 rounded-full bg-emerald-500" />
-                <span className="text-sm text-zinc-800 dark:text-zinc-200">{c.prenom} {c.nom}</span>
-              </div>
-              <span className="text-xs text-zinc-500 font-mono">{formatTantiemes(c.tantiemes)} tants.</span>
-            </div>
-          ))}
-        </div>
-      </div>
+      {/* Liste des copropriétaires */}
+      <CoproprietairesTable
+        coproprietaires={coproprietaires}
+        showPresence={true}
+        title="Liste des copropriétaires"
+        subtitle={`${presents.length} présent${presents.length > 1 ? "s" : ""} / ${coproprietaires.length}`}
+      />
     </div>
   );
 }

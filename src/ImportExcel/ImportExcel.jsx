@@ -4,7 +4,7 @@
 import { useState, useRef } from "react";
 import { Upload } from "lucide-react";
 import * as XLSX from "xlsx";
-import { supabase } from "../App";
+import { coproprietaireService } from "../services/db";
 import { formatTantiemes } from "../hooks/formatTantieme";
 
 export function ImportExcel({ coproprieteId, onImport }) {
@@ -40,9 +40,7 @@ export function ImportExcel({ coproprieteId, onImport }) {
       ...r,
       ...(coproprieteId ? { copropriete_id: coproprieteId } : {}),
     }));
-    const { error } = await supabase
-      .from("coproprietaires")
-      .upsert(rows, { onConflict: "email" });
+    const { error } = await coproprietaireService.upsertMany(rows);
     setLoading(false);
     if (!error) {
       onImport();

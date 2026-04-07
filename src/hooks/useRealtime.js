@@ -3,7 +3,7 @@
 // ============================================================
 
 import { useEffect, useRef } from "react";
-import { supabase } from "../App";
+import { supabase } from "../lib/supabase";
 
 /**
  * S'abonne aux changements d'une table Supabase en temps réel.

@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { Vote, ChevronRight, AlertCircle, ArrowLeft } from "lucide-react";
-import { supabase } from "../App";
+import { coproprietaireService, agSessionService } from "../services/db";
 
 export function CoproLogin({ onLogin, onBack = null }) {
   const [email, setEmail] = useState("");
@@ -21,12 +21,7 @@ export function CoproLogin({ onLogin, onBack = null }) {
     setError("");
 
     // 1. Trouver le coproprietaire
-    const { data, error: err } = await supabase
-      .from("coproprietaires")
-      .select("*")
-      .eq("email", email.toLowerCase().trim())
-      .eq("date_naissance", dateNaissance.trim())
-      .single();
+    const { data, error: err } = await coproprietaireService.fetchByLogin(email, dateNaissance);
 
     if (err || !data) {
       setError("Identifiants incorrects. Vérifiez votre email et date de naissance.");
@@ -37,20 +32,12 @@ export function CoproLogin({ onLogin, onBack = null }) {
     // 2. Trouver l'AG active de leur copropriété
     let agSession = null;
     if (data.copropriete_id) {
-      const { data: ag } = await supabase
-        .from("ag_sessions")
-        .select("*")
-        .eq("copropriete_id", data.copropriete_id)
-        .eq("statut", "en_cours")
-        .single();
+      const { data: ag } = await agSessionService.fetchActive(data.copropriete_id);
       agSession = ag || null;
     }
 
     // 3. Marquer présent
-    await supabase
-      .from("coproprietaires")
-      .update({ presence: true })
-      .eq("id", data.id);
+    await coproprietaireService.setPresence(data.id, true);
 
     localStorage.setItem("copro_profile", JSON.stringify(data));
     onLogin(data, agSession);

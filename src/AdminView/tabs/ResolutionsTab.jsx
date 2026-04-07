@@ -1,10 +1,11 @@
 import { useState, useEffect } from "react";
 import { Plus, BookOpen, ChevronDown, ChevronUp, X, Loader2, Save, CheckCircle } from "lucide-react";
-import { supabase } from "../../App";
+import { resolutionService, templateService } from "../../services/db";
 import { ResolutionCard } from "../../ResolutionCard/ResolutionCard";
 import { PlaceholderEditor } from "../../ResolutionTemplates/PlaceholderEditor";
 import { applyValues, saveAsTemplate } from "../../ResolutionTemplates/templates";
 import { DocumentsSection } from "../../DocumentSection/DocumentSection";
+import { MAJORITY_RULE_OPTIONS } from "../../utils/voteMajorityCalculator";
 
 export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, agSessionId, canModifyAgenda, canEditResolution, canLaunchVote, showAnticipeResults, isReadOnly, onUpdate }) {
   // --- États pour la Database (Modèles) ---
@@ -17,6 +18,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
   const [rawDesc, setRawDesc] = useState("");
   const [placeholderValues, setPlaceholderValues] = useState({});
   const [newMontant, setNewMontant] = useState("");
+  const [newMajorityRule, setNewMajorityRule] = useState("ARTICLE_24");
   const [showTemplates, setShowTemplates] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [newResolutionId, setNewResolutionId] = useState(null);
@@ -28,11 +30,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
 
   const fetchTemplates = async () => {
     setIsLoadingTemplates(true);
-    const { data, error } = await supabase
-      .from("resolution_templates")
-      .select("*")
-      .order("categorie", { ascending: true });
-
+    const { data, error } = await templateService.fetchAll();
     if (!error && data) {
       setDbModeles(data);
       const cats = [...new Set(data.map(m => m.categorie))];
@@ -46,6 +44,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
     setRawDesc("");
     setPlaceholderValues({});
     setNewMontant("");
+    setNewMajorityRule("ARTICLE_24");
     setShowTemplates(false);
     setNewResolutionId(null);
   };
@@ -73,13 +72,13 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
         ? parseFloat(newMontant.replace(/\s/g, "").replace(",", "."))
         : -1;
 
-      const { data, error } = await supabase.from("resolutions").insert({
+      const { data, error } = await resolutionService.create(agSessionId, {
         titre: newTitre.trim(),
         description: finalDesc.trim(),
         montant: isNaN(montantVal) ? -1 : montantVal,
         ordre: resolutions.length + 1,
-        ag_session_id: agSessionId,
-      }).select("id").single();
+        majority_rule: newMajorityRule,
+      });
 
       if (error) throw error;
 
@@ -96,7 +95,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
   // 4. Supprimer une résolution
   const handleDeleteResolution = async (id) => {
     if (!confirm("Supprimer cette résolution ?")) return;
-    await supabase.from("resolutions").delete().eq("id", id);
+    await resolutionService.delete(id);
     onUpdate();
   };
 
@@ -120,11 +119,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
       await saveAsTemplate(newTitre.trim(), rawDesc.trim(), category.trim());
 
       // Rafraîchir la liste locale des modèles pour qu'il apparaisse dans le menu immédiatement
-      const { data } = await supabase
-        .from("resolution_templates")
-        .select("*")
-        .order("categorie", { ascending: true });
-
+      const { data } = await templateService.fetchAll();
       setDbModeles(data);
       alert("Modèle ajouté à la bibliothèque avec succès !");
     } catch (error) {
@@ -224,16 +219,32 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
           onValuesChange={setPlaceholderValues}
         />
 
-        {/* Champ Montant */}
-        <div className="relative max-w-[200px]">
-          <input
-            className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-300 dark:border-zinc-700 rounded-lg px-3 py-2 pr-8 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 font-mono"
-            placeholder="Montant total €"
-            value={newMontant}
-            onChange={e => setNewMontant(e.target.value)}
-            inputMode="decimal"
-          />
-          <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-bold">€</span>
+        {/* Champs Montant + Règle de majorité */}
+        <div className="flex flex-wrap gap-3 items-end">
+          <div className="relative max-w-[200px]">
+            <input
+              className="w-full bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-300 dark:border-zinc-700 rounded-lg px-3 py-2 pr-8 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 font-mono"
+              placeholder="Montant total €"
+              value={newMontant}
+              onChange={e => setNewMontant(e.target.value)}
+              inputMode="decimal"
+            />
+            <span className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-zinc-400 font-bold">€</span>
+          </div>
+
+          {/* Règle de majorité (loi du 10 juillet 1965) */}
+          <div className="flex flex-col gap-1">
+            <label className="text-xs font-medium text-zinc-500 dark:text-zinc-400">Majorité requise</label>
+            <select
+              value={newMajorityRule}
+              onChange={e => setNewMajorityRule(e.target.value)}
+              className="bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-300 dark:border-zinc-700 rounded-lg px-3 py-2 text-sm text-zinc-900 dark:text-white focus:outline-none focus:border-emerald-500 transition-all"
+            >
+              {MAJORITY_RULE_OPTIONS.map(opt => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
+              ))}
+            </select>
+          </div>
         </div>
 
         {/* Section documents après enregistrement */}

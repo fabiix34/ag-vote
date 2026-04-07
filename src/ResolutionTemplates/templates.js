@@ -1,4 +1,4 @@
-import { supabase } from '../App';
+import { templateService } from '../services/db';
 
 const PLACEHOLDER_RE = /\{\{(\w+)\}\}/g;
 
@@ -51,11 +51,7 @@ export function formatLabel(key) {
 
 /** Récupère tous les modèles depuis Supabase */
 export async function getModeles() {
-  const { data, error } = await supabase
-    .from('resolution_templates')
-    .select('*')
-    .order('categorie', { ascending: true });
-
+  const { data, error } = await templateService.fetchAll();
   if (error) {
     console.error("Erreur lors de la récupération des modèles:", error);
     return [];
@@ -65,21 +61,13 @@ export async function getModeles() {
 
 /** Ajoute un nouveau modèle à la bibliothèque */
 export async function saveAsTemplate(titre, description, categorie) {
-  const { data, error } = await supabase
-    .from('resolution_templates')
-    .insert([{ titre, description, categorie, is_custom: true }])
-    .select();
-
+  const { data, error } = await templateService.create(titre, description, categorie);
   if (error) throw error;
   return data[0];
 }
 
 /** Supprime un modèle */
 export async function deleteTemplate(id) {
-  const { error } = await supabase
-    .from('resolution_templates')
-    .delete()
-    .eq('id', id);
-    
+  const { error } = await templateService.delete(id);
   if (error) throw error;
 }
