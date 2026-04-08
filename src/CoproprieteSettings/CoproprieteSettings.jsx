@@ -23,6 +23,11 @@ import { CoprosTab } from "../AdminView/tabs/CoprosTab";
 import { AlertModal } from "../components/AlertModal";
 
 const STATUS_INFO = {
+  vote_anticipe: {
+    label: "Vote anticipé actif",
+    color: "text-emerald-600 dark:text-emerald-400 bg-emerald-500/10",
+    Icon: Eye,
+  },
   planifiee: {
     label: "Planifiée",
     color: "text-blue-600 dark:text-blue-400 bg-blue-500/10",
@@ -275,7 +280,7 @@ export function CoproprieteSettings({ copropriete, onOpenAG, onBack }) {
                     <Calendar size={36} className="text-zinc-300 dark:text-zinc-700 mx-auto mb-3" />
                     <p className="text-zinc-500 font-medium">Aucune AG planifiée</p>
                     <p className="text-zinc-400 text-sm mt-1">
-                      Créez une AG pour démarrer les votes
+                      Créez une première AG pour commencer à gérer vos assemblées générales et leurs ordres du jour.
                     </p>
                   </div>
                 ) : (

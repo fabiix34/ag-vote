@@ -18,6 +18,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import { useRealtime } from "../hooks/useRealtime";
 import { coproprietaireService, resolutionService, pouvoirService, voteService, agSessionService } from "../services/db";
+import { AG_STATUT } from "../utils/agStatut";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CoprosTab } from "./tabs/CoprosTab";
 import { ResolutionsTab } from "./tabs/ResolutionsTab";
@@ -26,10 +27,9 @@ import { PVGenerator } from "../PVGenerator/PVGenerator";
 import { Loader } from "../Loader/Loader";
 import { AlertModal } from "../components/AlertModal";
 
-export function AdminView({ copropriete, agSession: initialAgSession, onBack, onEndAG }) {
+export function AdminView({ copropriete, agSession: initialAgSession, syndicId, onBack, onEndAG }) {
   const [agSession, setAgSession] = useState(initialAgSession);
-  const initConstruction = initialAgSession.statut === "planifiee" && !initialAgSession.vote_anticipe_actif;
-  const [tab, setTab] = useState(initConstruction ? "resolutions" : "dashboard");
+  const [tab, setTab] = useState(initialAgSession.statut === AG_STATUT.PLANIFIEE ? "resolutions" : "dashboard");
   const [coproprietaires, setCoproprietaires] = useState([]);
   const [resolutions, setResolutions] = useState([]);
   const [votes, setVotes] = useState([]);
@@ -43,14 +43,14 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
   const [alertModal, setAlertModal] = useState(null);
   const closeModal = () => setAlertModal(null);
 
-  const isPlanifiee = agSession.statut === "planifiee";
-  const isTerminee = agSession.statut === "terminee";
-  const isConstruction = isPlanifiee && !agSession.vote_anticipe_actif;
-  const isAnticipe = agSession.vote_anticipe_actif;
-  const isLive = !isPlanifiee && !isTerminee && !agSession.vote_anticipe_actif;
+  const statut = agSession.statut;
+  const isConstruction = statut === AG_STATUT.PLANIFIEE;
+  const isAnticipe     = statut === AG_STATUT.VOTE_ANTICIPE;
+  const isLive         = statut === AG_STATUT.EN_COURS;
+  const isTerminee     = statut === AG_STATUT.TERMINEE;
 
   const showDashboard = isLive || isTerminee;
-  const showPouvoirs = isAnticipe || isLive || isTerminee;
+  const showPouvoirs  = isAnticipe || isLive || isTerminee;
 
   const fetchAll = useCallback(async () => {
     const [{ data: copros }, { data: resols }, { data: pvrs }] = await Promise.all([
@@ -90,7 +90,9 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
     if (payload.eventType !== "DELETE" && payload.new?.ag_session_id !== agSession.id) return;
     setResolutions((prev) => {
       if (payload.eventType === "INSERT")
-        return [...prev, payload.new].sort((a, b) => a.ordre - b.ordre);
+        return prev.find((r) => r.id === payload.new.id)
+          ? prev
+          : [...prev, payload.new].sort((a, b) => a.ordre - b.ordre);
       if (payload.eventType === "UPDATE")
         return prev.map((r) => (r.id === payload.new.id ? payload.new : r));
       if (payload.eventType === "DELETE")
@@ -124,24 +126,27 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
 
   const handleToggleAnticipe = async () => {
     setTogglingAnticipe(true);
-    const newVal = !agSession.vote_anticipe_actif;
-    const newStatut = newVal ? "en_cours" : "planifiee";
-    await agSessionService.updateAnticipe(agSession.id, newVal, newStatut);
-    setAgSession((prev) => ({ ...prev, vote_anticipe_actif: newVal, statut: newStatut }));
+    const newStatut = isAnticipe ? AG_STATUT.PLANIFIEE : AG_STATUT.VOTE_ANTICIPE;
+    if (isAnticipe) {
+      await agSessionService.deactivateVoteAnticipe(agSession.id); // repasse à planifiee
+    } else {
+      await agSessionService.activateVoteAnticipe(agSession.id);
+    }
+    setAgSession((prev) => ({ ...prev, statut: newStatut }));
     setTogglingAnticipe(false);
   };
 
   const handleStartAG = async () => {
     setStarting(true);
-    await agSessionService.updateStatut(agSession.id, "en_cours");
-    setAgSession((prev) => ({ ...prev, statut: "en_cours" }));
+    await agSessionService.updateStatut(agSession.id, AG_STATUT.EN_COURS);
+    setAgSession((prev) => ({ ...prev, statut: AG_STATUT.EN_COURS }));
     setStarting(false);
   };
 
   const handleOpenSession = async () => {
     setStarting(true);
-    await agSessionService.disableAnticipe(agSession.id);
-    setAgSession((prev) => ({ ...prev, vote_anticipe_actif: false }));
+    await agSessionService.deactivateVoteAnticipe(agSession.id);
+    setAgSession((prev) => ({ ...prev, statut: AG_STATUT.EN_COURS }));
     setStarting(false);
   };
 
@@ -170,7 +175,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
     if (!showDashboard && tab === "dashboard") setTab("resolutions");
     if (!showPouvoirs && tab === "pouvoirs") setTab("resolutions");
     if (showDashboard && isLive && tab === "resolutions") setTab("dashboard");
-  }, [agSession.statut, agSession.vote_anticipe_actif]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [agSession.statut]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tabs = [
     ...(showDashboard ? [{ id: "dashboard", label: "Dashboard", icon: BarChart3 }] : []),
@@ -212,9 +217,9 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
             <p className="text-xs text-zinc-500">
               AG du {dateStr} ·{" "}
               <span
-                className={isTerminee ? "text-zinc-400" : agSession.vote_anticipe_actif ? "text-blue-500" : "text-emerald-500"}
+                className={isTerminee ? "text-zinc-400" : isAnticipe ? "text-blue-500" : "text-emerald-500"}
               >
-                {isTerminee ? "Terminée" : isPlanifiee ? "Planifiée" : agSession.vote_anticipe_actif ? "Vote anticipé" : "En cours"}
+                {isTerminee ? "Terminée" : isConstruction ? "Planifiée" : isAnticipe ? "Vote anticipé" : "En cours"}
               </span>
             </p>
           </div>
@@ -240,19 +245,16 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
             />
           )}
 
-          {isPlanifiee && (
+          {/* Phase construction : activer vote anticipé + démarrer l'AG */}
+          {isConstruction && (
             <>
               <button
                 onClick={handleToggleAnticipe}
                 disabled={togglingAnticipe}
-                className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 border ${
-                  agSession.vote_anticipe_actif
-                    ? "bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50"
-                    : "bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700"
-                }`}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 border bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700"
               >
                 <Vote size={14} />
-                {agSession.vote_anticipe_actif ? "Vote anticipé actif" : "Activer vote anticipé"}
+                Activer vote anticipé
               </button>
               <button
                 onClick={handleStartAG}
@@ -265,26 +267,38 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
             </>
           )}
 
-          {!isTerminee && !isPlanifiee && (
+          {/* Phase vote anticipé : désactiver ou ouvrir la séance */}
+          {isAnticipe && (
             <>
-              {agSession.vote_anticipe_actif ? (
-                <button
-                  onClick={handleOpenSession}
-                  disabled={starting}
-                  className="flex items-center gap-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
-                >
-                  <PlayCircle size={14} />
-                  {starting ? "Ouverture..." : "Ouvrir la séance"}
-                </button>
-              ) : (
-                <button
-                  onClick={() => setShowQR(!showQR)}
-                  className="flex items-center gap-1.5 text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 px-3 py-1.5 rounded-lg transition-colors"
-                >
-                  <QrCode size={14} />
-                  QR Code
-                </button>
-              )}
+              <button
+                onClick={handleToggleAnticipe}
+                disabled={togglingAnticipe}
+                className="flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50 border bg-blue-500/10 hover:bg-blue-500/20 text-blue-600 dark:text-blue-400 border-blue-200 dark:border-blue-800/50"
+              >
+                <Vote size={14} />
+                Vote anticipé actif
+              </button>
+              <button
+                onClick={handleOpenSession}
+                disabled={starting}
+                className="flex items-center gap-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1.5 rounded-lg transition-colors disabled:opacity-50"
+              >
+                <PlayCircle size={14} />
+                {starting ? "Ouverture..." : "Ouvrir la séance"}
+              </button>
+            </>
+          )}
+
+          {/* Phase live : QR Code + terminer */}
+          {isLive && (
+            <>
+              <button
+                onClick={() => setShowQR(!showQR)}
+                className="flex items-center gap-1.5 text-xs bg-zinc-100 dark:bg-zinc-800 hover:bg-zinc-200 dark:hover:bg-zinc-700 text-zinc-700 dark:text-zinc-300 px-3 py-1.5 rounded-lg transition-colors"
+              >
+                <QrCode size={14} />
+                QR Code
+              </button>
               <button
                 onClick={handleEndAG}
                 disabled={ending}
@@ -373,10 +387,11 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
                 coproprietaires={coproprietaires}
                 pouvoirs={pouvoirs}
                 agSessionId={agSession.id}
-                canModifyAgenda={isPlanifiee}
-                canEditResolution={isPlanifiee}
-                canLaunchVote={!isPlanifiee && !isTerminee && !agSession.vote_anticipe_actif}
-                showAnticipeResults={agSession.vote_anticipe_actif === true}
+                syndicId={syndicId}
+                canModifyAgenda={isConstruction}
+                canEditResolution={isConstruction}
+                canLaunchVote={isLive}
+                showAnticipeResults={isAnticipe}
                 isReadOnly={isTerminee}
                 onUpdate={fetchAll}
               />
@@ -387,7 +402,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
                 coproprietaires={coproprietaires}
                 resolutions={resolutions}
                 agSessionId={agSession.id}
-                isReadOnly={!isPlanifiee}
+                isReadOnly={!isConstruction}
                 onUpdate={fetchAll}
               />
             )}

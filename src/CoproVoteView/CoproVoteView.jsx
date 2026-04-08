@@ -4,8 +4,10 @@ import { resolutionService, voteService, coproprietaireService, pouvoirService, 
 import { useRealtime } from "../hooks/useRealtime";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
+import { AG_STATUT } from "../utils/agStatut";
 
-export function CoproVoteView({ profile, agSession, onLogout }) {
+export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }) {
+  const [agSession, setAgSession] = useState(initialAgSession);
   const [resolutions, setResolutions] = useState([]);
   const [votes, setVotes] = useState([]);
   const [totalTantiemes, setTotalTantiemes] = useState(0);
@@ -132,8 +134,13 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
 
   useRealtime("ag_sessions", (payload) => {
     if (payload.new?.id !== agSession?.id) return;
-    if (payload.eventType === "UPDATE" && payload.new?.statut === "terminee") {
-      onLogout();
+    if (payload.eventType === "UPDATE") {
+      if (payload.new?.statut === "terminee") {
+        onLogout();
+      } else {
+        // Met à jour le statut en temps réel
+        setAgSession((prev) => prev ? { ...prev, ...payload.new } : prev);
+      }
     }
   });
 
@@ -163,32 +170,31 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
     const resolution = resolutions.find((r) => r.id === resolutionId);
     if (resolution?.statut === "termine") return;
 
-    // Pour un vote sur la résolution en_cours, on utilise les mandants calculés dynamiquement
-    // par get_voting_weight (respect des plages [start, end]). Pour vote anticipé, fallback
-    // sur les pouvoirs actifs/scheduled_stop de la liste locale.
-    const mandantsForThisResolution = (
+    // Mandants éligibles pour la cascade : get_voting_weight si vote live, sinon liste locale
+    const mandantsForThisResolution =
       resolution?.statut === "en_cours" && votingWeight?.mandants?.length
         ? votingWeight.mandants
         : pouvoirs
             .filter((p) => p.statut === "active" || p.statut === "scheduled_stop")
             .map((p) => p.mandant)
-            .filter(Boolean)
-    );
+            .filter(Boolean);
 
-    const ops = [
-      voteService.upsertAndReturn(profile.id, resolutionId, choix, profile.tantiemes),
-      ...mandantsForThisResolution.flatMap((mandant) => {
+    // Exclure les mandants ayant une instruction de vote imposée
+    const mandantIds = mandantsForThisResolution
+      .filter((mandant) => {
         const pouvoir = pouvoirs.find((p) => p.mandant?.id === mandant.id || p.mandant_id === mandant.id);
-        // Si le mandant a fixé une instruction, son vote est déjà enregistré directement
-        if (pouvoir?.votes_imposes?.[resolutionId]) return [];
-        return [voteService.upsert(mandant.id, resolutionId, choix, mandant.tantiemes)];
-      }),
-    ];
+        return !pouvoir?.votes_imposes?.[resolutionId];
+      })
+      .map((m) => m.id);
 
-    const [{ data: savedVote, error }] = await Promise.all(ops);
+    // RPC atomique : vote + audit_log dans une seule transaction
+    // VPC si période vote_anticipe, LIVE sinon
+    const isVpc = agSession.statut === AG_STATUT.VOTE_ANTICIPE;
+    const submitFn = isVpc ? voteService.submitVpc : voteService.submitLive;
+    const { error } = await submitFn(profile.id, resolutionId, choix, mandantIds);
 
     if (!error) {
-      const row = savedVote ?? { coproprietaire_id: profile.id, resolution_id: resolutionId, choix, tantiemes_poids: profile.tantiemes };
+      const row = { coproprietaire_id: profile.id, resolution_id: resolutionId, choix, tantiemes_poids: profile.tantiemes };
       setVotes((prev) => {
         const exists = prev.find((v) => v.resolution_id === resolutionId);
         if (exists) return prev.map((v) => v.resolution_id === resolutionId ? row : v);
@@ -352,7 +358,7 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
 
   const votableResolutions = resolutions.filter((r) => {
     if (r.statut === "termine") return false;
-    if (agSession?.vote_anticipe_actif) return true; // vote anticipé : toutes sauf terminées
+    if (agSession?.statut === AG_STATUT.VOTE_ANTICIPE) return true; // vote anticipé : toutes sauf terminées
     return r.statut === "en_cours"; // séance live : seulement celles lancées par le syndic
   });
   const closedVotes = votes.filter((v) => !votableResolutions.find((r) => r.id === v.resolution_id));
@@ -629,7 +635,7 @@ export function CoproVoteView({ profile, agSession, onLogout }) {
             <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mx-auto">
               <Vote size={28} className="text-zinc-400 dark:text-zinc-500" />
             </div>
-            {agSession.statut === "planifiee" ? (
+            {agSession.statut === AG_STATUT.PLANIFIEE ? (
               <>
                 <p className="text-zinc-700 dark:text-zinc-300 font-medium">L'AG n'a pas encore démarré</p>
                 <p className="text-zinc-500 text-sm">Vous serez notifié dès l'ouverture du vote</p>

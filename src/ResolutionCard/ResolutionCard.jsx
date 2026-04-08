@@ -6,7 +6,7 @@ import { StatutBadge } from "../StatutBadge/StatutBadge";
 import { ResultatsResolution } from "../ResultatsResolution/ResultatsResolution";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
 
-export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = [], canModifyAgenda = false, canEditResolution = false, canLaunchVote = false, showAnticipeResults = false, onUpdate, onDelete }) {
+export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = [], syndicId, canModifyAgenda = false, canEditResolution = false, canLaunchVote = false, showAnticipeResults = false, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false);
   const [titre, setTitre] = useState(resolution.titre);
   const [description, setDescription] = useState(resolution.description || "");
@@ -21,24 +21,15 @@ export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = 
   const handleVoteForCopro = async (copro, choix) => {
     setVotingFor(`${copro.id}-${choix}`);
 
-    const existingVote = votes.find((v) => v.coproprietaire_id === copro.id && v.resolution_id === resolution.id);
-    const mainVoteOp = existingVote?.id
-      ? voteService.update(existingVote.id, choix, copro.tantiemes)
-      : voteService.insert(copro.id, resolution.id, choix, copro.tantiemes);
+    // IDs des mandants dont le vote est libre (pas d'instruction imposée)
+    const mandantIds = pouvoirs
+      .filter((p) => p.mandataire_id === copro.id && !p.votes_imposes?.[resolution.id])
+      .map((p) => p.mandant_id)
+      .filter(Boolean);
 
-    const voteOps = [mainVoteOp];
+    // RPC atomique : vote + audit_log VOTE_MANUAL_SYNDIC dans une seule transaction
+    await voteService.submitManualSyndic(syndicId, copro.id, resolution.id, choix, mandantIds);
 
-    // Cascade : voter aussi pour les mandants de ce copropriétaire
-    const mandants = pouvoirs.filter((p) => p.mandataire_id === copro.id);
-    for (const pouvoir of mandants) {
-      const mandant = coproprietaires.find((c) => c.id === pouvoir.mandant_id);
-      if (!mandant) continue;
-      // Si le mandant a fixé une instruction, son vote est déjà enregistré directement — on ne cascade pas
-      if (pouvoir.votes_imposes?.[resolution.id]) continue;
-      voteOps.push(voteService.upsert(mandant.id, resolution.id, choix, mandant.tantiemes));
-    }
-
-    await Promise.all(voteOps);
     setVotingFor(null);
   };
 

@@ -54,7 +54,7 @@ export const agSessionService = {
   fetchActive: (coproprieteId) =>
     supabase.from("ag_sessions").select("*")
       .eq("copropriete_id", coproprieteId)
-      .in("statut", ["planifiee", "en_cours"])
+      .in("statut", ["planifiee", "vote_anticipe", "en_cours"])
       .order("date_ag", { ascending: false })
       .limit(1).single(),
 
@@ -66,11 +66,11 @@ export const agSessionService = {
   updateStatut: (id, statut) =>
     supabase.from("ag_sessions").update({ statut }).eq("id", id),
 
-  updateAnticipe: (id, voteAnticipeActif, statut) =>
-    supabase.from("ag_sessions").update({ vote_anticipe_actif: voteAnticipeActif, statut }).eq("id", id),
+  activateVoteAnticipe: (id) =>
+    supabase.from("ag_sessions").update({ statut: "vote_anticipe" }).eq("id", id),
 
-  disableAnticipe: (id) =>
-    supabase.from("ag_sessions").update({ vote_anticipe_actif: false }).eq("id", id),
+  deactivateVoteAnticipe: (id) =>
+    supabase.from("ag_sessions").update({ statut: "en_cours" }).eq("id", id),
 
   terminate: (id) =>
     supabase.from("ag_sessions").update({ statut: "terminee" }).eq("id", id),
@@ -179,6 +179,39 @@ export const voteService = {
     supabase.from("votes").delete()
       .eq("coproprietaire_id", coproId)
       .eq("resolution_id", resolutionId),
+
+  // ── RPCs atomiques (vote + audit_log dans une seule transaction) ──────────
+
+  // Vote par correspondance (période vote_anticipe)
+  submitVpc: (voterId, resolutionId, choix, mandantIds = [], metadata = {}) =>
+    supabase.rpc("submit_vpc_vote", {
+      p_voter_id:      voterId,
+      p_resolution_id: resolutionId,
+      p_choix:         choix,
+      p_mandant_ids:   mandantIds,
+      p_metadata:      metadata,
+    }),
+
+  // Vote en séance (résolution en_cours) — détecte automatiquement VPC_OVERRIDDEN
+  submitLive: (voterId, resolutionId, choix, mandantIds = [], metadata = {}) =>
+    supabase.rpc("submit_live_vote", {
+      p_voter_id:      voterId,
+      p_resolution_id: resolutionId,
+      p_choix:         choix,
+      p_mandant_ids:   mandantIds,
+      p_metadata:      metadata,
+    }),
+
+  // Vote à main levée par le syndic pour un copropriétaire réfractaire
+  submitManualSyndic: (syndicId, coproId, resolutionId, choix, mandantIds = [], metadata = {}) =>
+    supabase.rpc("submit_manual_syndic_vote", {
+      p_syndic_id:     syndicId,
+      p_copro_id:      coproId,
+      p_resolution_id: resolutionId,
+      p_choix:         choix,
+      p_mandant_ids:   mandantIds,
+      p_metadata:      metadata,
+    }),
 };
 
 // ─── POUVOIRS ────────────────────────────────────────────────────────────────
@@ -326,16 +359,32 @@ export const auditLogsService = {
     supabase.from("audit_logs").insert({
       ag_session_id:     agSessionId,
       coproprietaire_id: mandataireId,
+      user_id:           mandataireId,
       action:            "pouvoir_quota_violation",
       details:           { detail },
+      payload:           { detail },
     }),
 
-  logPouvoirCancelledManual: (agSessionId, mandantId, pouvoirId, mandataireId) =>
+  logPouvoirCancelledManual: (agSessionId, mandantId, pouvoirId, mandataireId, tantiemes) =>
     supabase.from("audit_logs").insert({
       ag_session_id:     agSessionId,
       coproprietaire_id: mandantId,
+      user_id:           mandantId,
+      target_user_id:    mandataireId,
       action:            "pouvoir_cancelled_manual",
+      event_type:        "POWER_RECOVERED",
       details:           { pouvoir_id: pouvoirId, mandataire_id: mandataireId },
+      payload:           { pouvoir_id: pouvoirId, mandataire_id: mandataireId, tantiemes_snapshot: tantiemes ?? 0 },
+    }),
+
+  // Connexion / déconnexion d'un copropriétaire — RPC atomique
+  logAuthEvent: (coproId, agSessionId, eventType, metadata = {}) =>
+    console.log("Logging auth event", { coproId, agSessionId, eventType, metadata }) ||
+    supabase.rpc("log_auth_event", {
+      p_copro_id:      coproId,
+      p_ag_session_id: agSessionId ?? null,
+      p_event_type:    eventType,   // 'AUTH_LOGIN' | 'AUTH_LOGOUT'
+      p_metadata:      metadata,
     }),
 
   fetchByAgSession: (agSessionId) =>

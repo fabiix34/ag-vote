@@ -8,7 +8,7 @@ import { applyValues, saveAsTemplate } from "../../ResolutionTemplates/templates
 import { MAJORITY_RULE_OPTIONS } from "../../utils/voteMajorityCalculator";
 import { AlertModal } from "../../components/AlertModal";
 
-export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, agSessionId, canModifyAgenda, canEditResolution, canLaunchVote, showAnticipeResults, isReadOnly, onUpdate }) {
+export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, agSessionId, syndicId, canModifyAgenda, canEditResolution, canLaunchVote, showAnticipeResults, isReadOnly, onUpdate }) {
   // --- État modal d'alerte ---
   const [alertModal, setAlertModal] = useState(null);
   const closeModal = () => setAlertModal(null);
@@ -26,6 +26,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
   const [showTemplates, setShowTemplates] = useState(false);
   const [isSaving, setIsSaving] = useState(false);
   const [pendingFiles, setPendingFiles] = useState([]);
+  const [uploadingIds, setUploadingIds] = useState([]);
   const fileRef = useRef();
 
   // 1. Charger les modèles depuis Supabase au montage
@@ -61,7 +62,6 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
     setNewTitre(tpl.titre);
     setRawDesc(tpl.description);
     setPlaceholderValues({});
-    setNewMontant(""); // On laisse l'utilisateur remplir si besoin
     setShowTemplates(false);
   };
 
@@ -82,8 +82,8 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
 
       if (error) throw error;
 
-      // Upload des fichiers stagés
       if (pendingFiles.length > 0) {
+        setUploadingIds((prev) => [...prev, data.id]);
         await Promise.all(
           pendingFiles.map(async (file) => {
             const path = `${data.id}/${Date.now()}-${sanitizeFilename(file.name)}`;
@@ -95,6 +95,8 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
             }
           })
         );
+        setUploadingIds((prev) => prev.filter((id) => id !== data.id));
+        onUpdate();
       }
 
       resetForm();
@@ -312,9 +314,10 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
               ref={fileRef}
               type="file"
               className="hidden"
+              multiple
               onChange={(e) => {
-                const file = e.target.files[0];
-                if (file) setPendingFiles((prev) => [...prev, file]);
+                const files = Array.from(e.target.files);
+                if (files.length) setPendingFiles((prev) => [...prev, ...files]);
                 e.target.value = "";
               }}
             />
@@ -394,21 +397,33 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
         ) : (
           resolutions
             .sort((a, b) => a.ordre - b.ordre)
-            .map((r) => (
-              <ResolutionCard
-                key={r.id}
-                resolution={r}
-                votes={votes}
-                coproprietaires={coproprietaires}
-                pouvoirs={pouvoirs || []}
-                canModifyAgenda={canModifyAgenda}
-                canEditResolution={canEditResolution}
-                canLaunchVote={canLaunchVote}
-                showAnticipeResults={showAnticipeResults}
-                onUpdate={onUpdate}
-                onDelete={handleDeleteResolution}
-              />
-            ))
+            .map((r) =>
+              uploadingIds.includes(r.id) ? (
+                <div
+                  key={r.id}
+                  className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl px-4 py-3 flex items-center gap-3 text-sm text-zinc-500 dark:text-zinc-400"
+                >
+                  <Loader2 size={14} className="animate-spin text-emerald-500 shrink-0" />
+                  <span className="font-medium text-zinc-700 dark:text-zinc-300 truncate">{r.titre}</span>
+                  <span className="ml-auto text-xs shrink-0">Upload de fichiers en cours...</span>
+                </div>
+              ) : (
+                <ResolutionCard
+                  key={r.id}
+                  resolution={r}
+                  votes={votes}
+                  coproprietaires={coproprietaires}
+                  pouvoirs={pouvoirs || []}
+                  syndicId={syndicId}
+                  canModifyAgenda={canModifyAgenda}
+                  canEditResolution={canEditResolution}
+                  canLaunchVote={canLaunchVote}
+                  showAnticipeResults={showAnticipeResults}
+                  onUpdate={onUpdate}
+                  onDelete={handleDeleteResolution}
+                />
+              )
+            )
         )}
       </div>
     </div>
