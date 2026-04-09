@@ -26,7 +26,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
 
   // Copros qui n'ont pas encore donné de pouvoir dans cette AG
   const mandantsDisponibles = coproprietaires.filter(
-    (c) => !pouvoirs.find((p) => p.mandant_id === c.id)
+    (c) => !c.presence && !pouvoirs.find((p) => p.mandant_id === c.id)
   );
 
   const copro = (id) => coproprietaires.find((c) => c.id === id);
