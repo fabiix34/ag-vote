@@ -11,7 +11,7 @@ const CHOIX_OPTS = [
   { value: "abstention", label: "Abstention" },
 ];
 
-export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionId, isReadOnly = false, onUpdate }) {
+export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionId, canAdd = true, isReadOnly = false, onUpdate }) {
   const [showModal, setShowModal] = useState(false);
   const [mandantId, setMandantId] = useState("");
   const [mandataireId, setMandataireId] = useState("");
@@ -166,10 +166,14 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
               Pouvoirs de vote ({pouvoirs.length})
             </h2>
             <p className="text-xs text-zinc-500 mt-0.5">
-              {isReadOnly ? "L'AG est démarrée — les pouvoirs ne peuvent plus être modifiés." : "Délégations enregistrées pour cette AG"}
+              {!canAdd
+                ? "L'AG est terminée — aucun pouvoir ne peut plus être enregistré."
+                : isReadOnly
+                ? "Séance en cours — vous pouvez encore enregistrer un pouvoir."
+                : "Délégations enregistrées pour cette AG"}
             </p>
           </div>
-          {!isReadOnly && (
+          {canAdd && (
             <button
               onClick={handleOpenModal}
               className="flex items-center gap-1.5 text-xs bg-emerald-500/10 hover:bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 border border-emerald-200 dark:border-emerald-800/50 px-3 py-1.5 rounded-lg transition-colors"
@@ -354,7 +358,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
               <div>
                 <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
                   Mandataire <span className="text-red-500">*</span>
-                  <span className="font-normal text-zinc-400 ml-1">(copropriétaire qui reçoit le pouvoir)</span>
+                  <span className="font-normal text-zinc-400 ml-1">(copropriétaire présent qui reçoit le pouvoir)</span>
                 </label>
                 <select
                   value={mandataireId}
@@ -363,7 +367,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
                 >
                   <option value="">— Sélectionner le mandataire —</option>
                   {coproprietaires
-                    .filter((c) => c.id !== mandantId)
+                    .filter((c) => c.id !== mandantId && c.presence)
                     .map((c) => (
                       <option key={c.id} value={c.id}>
                         {c.prenom} {c.nom}

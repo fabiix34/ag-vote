@@ -1,37 +1,37 @@
 
-import { useState } from "react";
-import { CheckCircle, Edit3, Hand, Play, Trash2 } from "lucide-react";
-import { voteService, resolutionService } from "../services/db";
+import { useState, useMemo } from "react";
+import { Edit3, Play, Trash2 } from "lucide-react";
+import { resolutionService } from "../services/db";
+import { useRealtime } from "../hooks/useRealtime";
 import { StatutBadge } from "../StatutBadge/StatutBadge";
 import { ResultatsResolution } from "../ResultatsResolution/ResultatsResolution";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
+import { VoteLivePanel } from "../VoteLivePanel/VoteLivePanel";
 
-export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = [], syndicId, canModifyAgenda = false, canEditResolution = false, canLaunchVote = false, showAnticipeResults = false, onUpdate, onDelete }) {
+export function ResolutionCard({ resolution, votes: initialVotes = [], coproprietaires, pouvoirs = [], syndicId, canModifyAgenda = false, canEditResolution = false, canLaunchVote = false, showAnticipeResults = false, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false);
+
+  // ── Votes propres à cette résolution ────────────────────────────────────
+  const [votes, setVotes] = useState(
+    () => initialVotes.filter((v) => v.resolution_id === resolution.id)
+  );
+
+  const realtimeFilter = useMemo(
+    () => `resolution_id=eq.${resolution.id}`,
+    [resolution.id]
+  );
+
+  useRealtime("votes", ({ eventType, new: newRow, old: oldRow }) => {
+    setVotes((prev) => {
+      if (eventType === "INSERT") return [...prev, newRow];
+      if (eventType === "UPDATE") return prev.map((v) => (v.id === newRow.id ? newRow : v));
+      if (eventType === "DELETE") return prev.filter((v) => v.id !== oldRow.id);
+      return prev;
+    });
+  }, { filter: realtimeFilter });
   const [titre, setTitre] = useState(resolution.titre);
   const [description, setDescription] = useState(resolution.description || "");
   const [loading, setLoading] = useState(false);
-  const [showMainLevee, setShowMainLevee] = useState(false);
-  const [votingFor, setVotingFor] = useState(null);
-
-  const votesForResolution = votes.filter((v) => v.resolution_id === resolution.id);
-  const votedIds = new Set(votesForResolution.map((v) => v.coproprietaire_id));
-  const notVotedYet = coproprietaires.filter((c) => !votedIds.has(c.id));
-
-  const handleVoteForCopro = async (copro, choix) => {
-    setVotingFor(`${copro.id}-${choix}`);
-
-    // IDs des mandants dont le vote est libre (pas d'instruction imposée)
-    const mandantIds = pouvoirs
-      .filter((p) => p.mandataire_id === copro.id && !p.votes_imposes?.[resolution.id])
-      .map((p) => p.mandant_id)
-      .filter(Boolean);
-
-    // RPC atomique : vote + audit_log VOTE_MANUAL_SYNDIC dans une seule transaction
-    await voteService.submitManualSyndic(syndicId, copro.id, resolution.id, choix, mandantIds);
-
-    setVotingFor(null);
-  };
 
   const handleStatutChange = async (statut) => {
     setLoading(true);
@@ -98,77 +98,21 @@ export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = 
       {/* Documents */}
       <DocumentsSection resolutionId={resolution.id} canManage={canModifyAgenda && resolution.statut === "en_attente"} />
 
-      {/* Résultats si votes */}
-      {(resolution.statut === "en_cours" || resolution.statut === "termine" || showAnticipeResults) && (
-        <ResultatsResolution resolution={resolution} votes={votes} coproprietaires={coproprietaires} />
+      {/* Panel de vote en séance (saisie par exception) */}
+      {resolution.statut === "en_cours" && (
+        <VoteLivePanel
+          resolution={resolution}
+          votes={votes}
+          coproprietaires={coproprietaires}
+          pouvoirs={pouvoirs}
+          syndicId={syndicId}
+          onCloseVote={() => handleStatutChange("termine")}
+        />
       )}
 
-      {/* Vote à main levée */}
-      {resolution.statut === "en_cours" && (
-        <div className="border border-amber-200 dark:border-amber-800/50 rounded-lg overflow-hidden">
-          <button
-            onClick={() => setShowMainLevee((v) => !v)}
-            className="w-full flex items-center justify-between px-3 py-2 bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400 text-xs font-medium hover:bg-amber-100 dark:hover:bg-amber-900/30 transition-colors"
-          >
-            <span className="flex items-center gap-1.5">
-              <Hand size={12} />
-              Vote à main levée
-              {notVotedYet.length > 0 && (
-                <span className="bg-amber-200 dark:bg-amber-800 text-amber-800 dark:text-amber-300 rounded-full px-1.5 py-0.5 text-[10px] font-bold">
-                  {notVotedYet.length} n'ont pas voté
-                </span>
-              )}
-            </span>
-            <span className="text-amber-400">{showMainLevee ? "▲" : "▼"}</span>
-          </button>
-
-          {showMainLevee && (
-            <div className="divide-y divide-zinc-100 dark:divide-zinc-800">
-              {notVotedYet.length === 0 ? (
-                <p className="px-3 py-3 text-xs text-zinc-500 text-center">Tous les copropriétaires ont voté.</p>
-              ) : (
-                notVotedYet.map((copro) => (
-                  <div key={copro.id} className="px-3 py-2 flex items-center justify-between gap-3">
-                    <div className="min-w-0">
-                      <span className="text-sm text-zinc-800 dark:text-zinc-200">
-                        {copro.prenom} {copro.nom}
-                        <span className="text-xs text-zinc-400 ml-1">({copro.tantiemes} tants.)</span>
-                      </span>
-                      {(() => {
-                        const mandants = pouvoirs.filter((p) => p.mandataire_id === copro.id);
-                        if (!mandants.length) return null;
-                        return (
-                          <p className="text-[11px] text-blue-500 dark:text-blue-400">
-                            + pouvoir de {mandants.map((p) => {
-                              const m = coproprietaires.find((c) => c.id === p.mandant_id);
-                              return m ? `${m.prenom} ${m.nom}` : "—";
-                            }).join(", ")}
-                          </p>
-                        );
-                      })()}
-                    </div>
-                    <div className="flex gap-1 shrink-0">
-                      {[
-                        { choix: "pour", label: "Pour", cls: "bg-emerald-100 dark:bg-emerald-900/40 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-800/50" },
-                        { choix: "contre", label: "Contre", cls: "bg-red-100 dark:bg-red-900/40 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/50" },
-                        { choix: "abstention", label: "Abst.", cls: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700" },
-                      ].map(({ choix, label, cls }) => (
-                        <button
-                          key={choix}
-                          onClick={() => handleVoteForCopro(copro, choix)}
-                          disabled={votingFor !== null}
-                          className={`text-[11px] font-semibold px-2 py-1 rounded-md transition-colors disabled:opacity-50 ${cls}`}
-                        >
-                          {votingFor === `${copro.id}-${choix}` ? "..." : label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          )}
-        </div>
+      {/* Résultats après clôture ou pendant vote anticipé */}
+      {(resolution.statut === "termine" || showAnticipeResults) && (
+        <ResultatsResolution resolution={resolution} votes={votes} coproprietaires={coproprietaires} />
       )}
 
       {/* Actions */}
@@ -181,15 +125,6 @@ export function ResolutionCard({ resolution, votes, coproprietaires, pouvoirs = 
               className="flex items-center gap-1.5 text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
             >
               <Play size={12} /> Lancer le vote
-            </button>
-          )}
-          {resolution.statut === "en_cours" && (
-            <button
-              onClick={() => handleStatutChange("termine")}
-              disabled={loading}
-              className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
-            >
-              <CheckCircle size={12} /> Clôturer
             </button>
           )}
           {resolution.statut === "termine" && (

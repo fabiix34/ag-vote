@@ -75,16 +75,8 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
 
   // Realtime subscriptions — mises à jour ciblées sans refetch global
 
-  useRealtime("votes", (payload) => {
-    setVotes((prev) => {
-      if (payload.eventType === "INSERT") return [...prev, payload.new];
-      if (payload.eventType === "UPDATE")
-        return prev.map((v) => (v.id === payload.new.id ? payload.new : v));
-      if (payload.eventType === "DELETE")
-        return prev.filter((v) => v.id !== payload.old.id);
-      return prev;
-    });
-  }, { onStatusChange: setConnected });
+  // Les votes sont gérés en temps réel par chaque ResolutionCard (filtre par resolution_id).
+  // AdminView conserve le snapshot initial pour DashboardTab et PVGenerator.
 
   useRealtime("resolutions", (payload) => {
     if (payload.eventType !== "DELETE" && payload.new?.ag_session_id !== agSession.id) return;
@@ -99,7 +91,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
         return prev.filter((r) => r.id !== payload.old.id);
       return prev;
     });
-  });
+  }, { onStatusChange: setConnected });
 
   useRealtime("pouvoirs", (payload) => {
     if (payload.new?.ag_session_id !== agSession.id && payload.old?.ag_session_id !== agSession.id) return;
@@ -402,6 +394,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
                 coproprietaires={coproprietaires}
                 resolutions={resolutions}
                 agSessionId={agSession.id}
+                canAdd={!isTerminee}
                 isReadOnly={!isConstruction}
                 onUpdate={fetchAll}
               />

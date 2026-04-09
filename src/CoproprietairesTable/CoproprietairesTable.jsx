@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Fragment } from "react";
 import { UserPlus, Trash2, X, Upload, ChevronDown } from "lucide-react";
 import * as XLSX from "xlsx";
 import { coproprietaireService } from "../services/db";
@@ -32,6 +32,11 @@ export function CoproprietairesTable({
   title = "Liste des copropriétaires",
   subtitle,
   onMutate,
+  hideEmail = false,
+  extraColumns = [],
+  renderSubRows,
+  renderNameExtra,
+  emptyMessage,
 }) {
   // --- Recherche & pagination ---
   const [search, setSearch] = useState("");
@@ -63,6 +68,18 @@ export function CoproprietairesTable({
   const [importPreview, setImportPreview] = useState([]);
   const [importing, setImporting] = useState(false);
   const fileRef = useRef(null);
+
+  // --- Toggle présence ---
+  const [togglingPresenceId, setTogglingPresenceId] = useState(null);
+
+  const handleTogglePresence = async (e, c) => {
+    e.stopPropagation();
+    if (togglingPresenceId) return;
+    setTogglingPresenceId(c.id);
+    await coproprietaireService.setPresence(c.id, !c.presence);
+    setTogglingPresenceId(null);
+    onMutate?.();
+  };
 
   // --- Suppression ---
   const [deletingId, setDeletingId] = useState(null);
@@ -197,7 +214,14 @@ export function CoproprietairesTable({
   };
 
   // ---- Colonnes ----
-  const headers = ["Nom", "Prénom", "Email", "Tantièmes", ...(showPresence ? ["Présence"] : []), ...(canDelete ? [""] : [])];
+  const headers = [
+    "Nom", "Prénom",
+    ...(!hideEmail ? ["Email"] : []),
+    "Tantièmes",
+    ...(showPresence ? ["Présence"] : []),
+    ...extraColumns.map((c) => c.header),
+    ...(canDelete ? [""] : []),
+  ];
   const colSpan = headers.length;
 
   return (
@@ -280,27 +304,44 @@ export function CoproprietairesTable({
               {slice.length === 0 ? (
                 <tr>
                   <td colSpan={colSpan} className="px-4 py-8 text-center text-zinc-400 text-sm">
-                    {q ? "Aucun résultat pour cette recherche." : "Aucun copropriétaire."}
+                    {q ? "Aucun résultat pour cette recherche." : (emptyMessage ?? "Aucun copropriétaire.")}
                   </td>
                 </tr>
               ) : slice.map((c) => (
+                <Fragment key={c.id}>
                 <tr
-                  key={c.id}
                   onClick={() => handleOpenEdit(c)}
                   className={`hover:bg-zinc-50 dark:hover:bg-zinc-800/50 transition-colors ${canEdit ? "cursor-pointer" : ""}`}
                 >
-                  <td className="px-4 py-2.5 font-medium text-zinc-800 dark:text-zinc-200">{c.nom}</td>
+                  <td className="px-4 py-2.5 font-medium text-zinc-800 dark:text-zinc-200">
+                    <div className="flex items-center gap-1.5 flex-wrap">
+                      {c.nom}
+                      {renderNameExtra?.(c)}
+                    </div>
+                  </td>
                   <td className="px-4 py-2.5 text-zinc-700 dark:text-zinc-300">{c.prenom}</td>
-                  <td className="px-4 py-2.5 text-zinc-500 dark:text-zinc-400">{c.email || "—"}</td>
+                  {!hideEmail && <td className="px-4 py-2.5 text-zinc-500 dark:text-zinc-400">{c.email || "—"}</td>}
                   <td className="px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-mono">{formatTantiemes(c.tantiemes)}</td>
                   {showPresence && (
                     <td className="px-4 py-2.5">
-                      <span className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full ${c.presence ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400" : "bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400"}`}>
+                      <button
+                        onClick={(e) => handleTogglePresence(e, c)}
+                        title="Cliquer pour valider la présence"
+                        disabled={!!togglingPresenceId}
+                        className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors disabled:opacity-50 ${
+                          c.presence
+                            ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/30"
+                            : "bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-600"
+                        }`}
+                      >
                         <span className={`w-1.5 h-1.5 rounded-full ${c.presence ? "bg-emerald-500" : "bg-zinc-400 dark:bg-zinc-500"}`} />
-                        {c.presence ? "Présent" : "Absent"}
-                      </span>
+                        {togglingPresenceId === c.id ? "…" : c.presence ? "Présent" : "Absent"}
+                      </button>
                     </td>
                   )}
+                  {extraColumns.map((col, i) => (
+                    <td key={i} className="px-4 py-2.5">{col.cell(c)}</td>
+                  ))}
                   {canDelete && (
                     <td className="px-4 py-2.5">
                       <button
@@ -314,6 +355,8 @@ export function CoproprietairesTable({
                     </td>
                   )}
                 </tr>
+                {renderSubRows?.(c)}
+                </Fragment>
               ))}
             </tbody>
           </table>

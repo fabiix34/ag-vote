@@ -11,7 +11,7 @@ import { supabase } from "../lib/supabase";
  * - callbackRef → jamais de callback périmé, pas besoin de useCallback côté appelant
  * - onStatusChange (optionnel) → suivi de l'état de connexion
  */
-export function useRealtime(table, callback, { onStatusChange } = {}) {
+export function useRealtime(table, callback, { onStatusChange, filter } = {}) {
   const callbackRef = useRef(callback);
   callbackRef.current = callback;
 
@@ -19,24 +19,19 @@ export function useRealtime(table, callback, { onStatusChange } = {}) {
   onStatusChangeRef.current = onStatusChange;
 
   useEffect(() => {
-    // Générateur d'ID de secours si crypto.randomUUID n'est pas dispo
-    const generateId = () => {
-      if (typeof crypto !== 'undefined' && crypto.randomUUID) {
-        return crypto.randomUUID();
-      }
-      // Fallback simple pour le nom du channel
-      return Math.random().toString(36).substring(2, 15);
-    };
+    const generateId = () =>
+      typeof crypto !== "undefined" && crypto.randomUUID
+        ? crypto.randomUUID()
+        : Math.random().toString(36).substring(2, 15);
 
     const channelName = `realtime-${table}-${generateId()}`;
 
+    const config = { event: "*", schema: "public", table };
+    if (filter) config.filter = filter;
+
     const channel = supabase
       .channel(channelName)
-      .on(
-        "postgres_changes",
-        { event: "*", schema: "public", table },
-        (payload) => callbackRef.current(payload)
-      )
+      .on("postgres_changes", config, (payload) => callbackRef.current(payload))
       .subscribe((status) => {
         onStatusChangeRef.current?.(status === "SUBSCRIBED");
       });
@@ -44,5 +39,5 @@ export function useRealtime(table, callback, { onStatusChange } = {}) {
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [table]); // uniquement si la table change (jamais en pratique)
+  }, [table, filter]); // se ré-abonne si table ou filtre change
 }
