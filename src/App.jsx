@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useDomain } from "./hooks/useDomain";
 import { supabase } from "./lib/supabase";
-import { syndicService, coproprieteService, agSessionService, coproprietaireService, logsAgService, auditLogsService } from "./services/db";
+import { syndicService, coproprieteService, agSessionService, coproprietaireService, auditLogsService } from "./services/db";
 import { SyndicAuth } from "./SyndicAuth/SyndicAuth";
 import { SyndicDashboard } from "./SyndicDashboard/SyndicDashboard";
 import { CoproprieteSettings } from "./CoproprieteSettings/CoproprieteSettings";

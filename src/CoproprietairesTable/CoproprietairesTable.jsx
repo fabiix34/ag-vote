@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect, Fragment } from "react";
 import { UserPlus, Trash2, X, Upload, ChevronDown } from "lucide-react";
 import * as XLSX from "xlsx";
-import { coproprietaireService } from "../services/db";
+import { coproprietaireService, auditLogsService } from "../services/db";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { AlertModal } from "../components/AlertModal";
 
@@ -37,6 +37,7 @@ export function CoproprietairesTable({
   renderSubRows,
   renderNameExtra,
   emptyMessage,
+  agSessionId,
 }) {
   // --- Recherche & pagination ---
   const [search, setSearch] = useState("");
@@ -76,7 +77,14 @@ export function CoproprietairesTable({
     e.stopPropagation();
     if (togglingPresenceId) return;
     setTogglingPresenceId(c.id);
-    await coproprietaireService.setPresence(c.id, !c.presence);
+    const newPresence = !c.presence;
+    await coproprietaireService.setPresence(c.id, newPresence);
+    if (agSessionId) {
+      await auditLogsService.logPresenceEvent(agSessionId, c.id, newPresence, {
+        nom: c.nom,
+        prenom: c.prenom,
+      });
+    }
     setTogglingPresenceId(null);
     onMutate?.();
   };

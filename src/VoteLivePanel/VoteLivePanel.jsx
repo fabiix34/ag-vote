@@ -271,6 +271,7 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs, sy
           <CoproprietairesTable
             coproprietaires={sortedCopros}
             showPresence
+            agSessionId={resolution.ag_session_id}
             onMutate={onPresenceUpdate}
           />
         </div>

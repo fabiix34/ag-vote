@@ -106,6 +106,7 @@ export function DashboardTab({ coproprietaires, resolutions, votes, agSession, p
       <CoproprietairesTable
         coproprietaires={coproprietaires}
         showPresence={true}
+        agSessionId={agSession?.id}
         title="Liste des copropriétaires"
         subtitle={`${presents.length} présent${presents.length > 1 ? "s" : ""} / ${coproprietaires.length}`}
       />

@@ -351,7 +351,7 @@ export const pouvoirTokenService = {
 // ─── AUDIT LOGS ──────────────────────────────────────────────────────────────
 // Piste d'audit juridique (art. 22, loi 1965). Table immuable.
 // La majorité des entrées est créée par des triggers PostgreSQL.
-// Le frontend y insère uniquement les tentatives de violation de quota.
+// Le frontend y insère uniquement les événements métier non couverts par les triggers.
 
 export const auditLogsService = {
   // Enregistre une tentative de violation de quota (bloquée côté frontend)
@@ -387,27 +387,44 @@ export const auditLogsService = {
       p_metadata:      metadata,
     }),
 
-  fetchByAgSession: (agSessionId) =>
-    supabase.from("audit_logs").select("*")
-      .eq("ag_session_id", agSessionId)
-      .order("created_at", { ascending: true }),
-};
-
-// ─── LOGS AG ─────────────────────────────────────────────────────────────────
-// Table immuable : pas d'UPDATE ni de DELETE côté RLS.
-// types : 'connexion' | 'deconnexion' | 'pouvoir_donne' | 'pouvoir_revoque'
-
-export const logsAgService = {
-  insert: (agSessionId, coproprietaireId, type, details = {}) =>
-    supabase.from("logs_ag").insert({
-      ag_session_id: agSessionId || null,
-      coproprietaire_id: coproprietaireId,
-      type,
+  // Arrivée / départ physique d'un copropriétaire (togglé par le syndic)
+  logPresenceEvent: (agSessionId, coproId, arrived, details = {}) =>
+    supabase.from("audit_logs").insert({
+      ag_session_id:     agSessionId || null,
+      coproprietaire_id: coproId,
+      user_id:           coproId,
+      action:            arrived ? "arrivee_physique" : "depart_physique",
+      event_type:        arrived ? "ATTENDANCE_ARRIVED" : "ATTENDANCE_LEFT",
       details,
+      payload:           details,
+    }),
+
+  // Pouvoir donné via token QR (accepté par le mandataire)
+  logPouvoirDonne: (agSessionId, mandantId, details = {}) =>
+    supabase.from("audit_logs").insert({
+      ag_session_id:     agSessionId || null,
+      coproprietaire_id: mandantId,
+      user_id:           mandantId,
+      action:            "pouvoir_donne",
+      event_type:        "POWER_GRANTED",
+      details,
+      payload:           details,
+    }),
+
+  // Pouvoir révoqué par le mandant lui-même en cours de séance
+  logPouvoirRevoque: (agSessionId, coproId, details = {}) =>
+    supabase.from("audit_logs").insert({
+      ag_session_id:     agSessionId || null,
+      coproprietaire_id: coproId,
+      user_id:           coproId,
+      action:            "pouvoir_revoque",
+      event_type:        "POWER_REVOKED",
+      details,
+      payload:           details,
     }),
 
   fetchByAgSession: (agSessionId) =>
-    supabase.from("logs_ag").select("*")
+    supabase.from("audit_logs").select("*")
       .eq("ag_session_id", agSessionId)
       .order("created_at", { ascending: true }),
 };

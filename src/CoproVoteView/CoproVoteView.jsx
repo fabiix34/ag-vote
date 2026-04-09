@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, MinusCircle, LogOut, Vote, Check, Share2, Copy, UserCheck, X } from "lucide-react";
-import { resolutionService, voteService, coproprietaireService, pouvoirService, pouvoirTokenService, logsAgService, auditLogsService } from "../services/db";
+import { resolutionService, voteService, coproprietaireService, pouvoirService, pouvoirTokenService, auditLogsService } from "../services/db";
 import { useRealtime } from "../hooks/useRealtime";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
@@ -144,6 +144,13 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
     }
   });
 
+  // Déconnexion forcée si le syndic retire la présence du copropriétaire
+  useRealtime("coproprietaires", (payload) => {
+    if (payload.eventType === "UPDATE" && payload.new?.presence === false) {
+      onLogout();
+    }
+  }, { filter: `id=eq.${profile.id}` });
+
   useRealtime("resolutions", (payload) => {
     if (payload.new?.ag_session_id !== agSession?.id && payload.old?.ag_session_id !== agSession?.id) return;
     setResolutions((prev) => {
@@ -256,7 +263,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
     if (!error) {
       await Promise.all([
         pouvoirTokenService.markUsed(pendingToken.id),
-        logsAgService.insert(agSession.id, pendingToken.mandant_id, "pouvoir_donne", {
+        auditLogsService.logPouvoirDonne(agSession.id, pendingToken.mandant_id, {
           mandataire_id:     profile.id,
           mandataire_prenom: profile.prenom,
           mandataire_nom:    profile.nom,
@@ -297,7 +304,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
 
     if (!error) {
       await Promise.all([
-        logsAgService.insert(agSession?.id ?? null, profile.id, "pouvoir_revoque", {
+        auditLogsService.logPouvoirRevoque(agSession?.id ?? null, profile.id, {
           mandataire_id:  mandataireId,
           mandataire_nom: mandataireNom,
           pivot_resolution: activeResolution?.id ?? null,

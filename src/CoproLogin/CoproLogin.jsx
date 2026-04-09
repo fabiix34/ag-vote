@@ -4,7 +4,7 @@
 
 import { useState } from "react";
 import { Vote, ChevronRight, AlertCircle, ArrowLeft } from "lucide-react";
-import { coproprietaireService, agSessionService, logsAgService, auditLogsService } from "../services/db";
+import { coproprietaireService, agSessionService, auditLogsService } from "../services/db";
 
 export function CoproLogin({ onLogin, onBack = null }) {
   const [email, setEmail] = useState("");
