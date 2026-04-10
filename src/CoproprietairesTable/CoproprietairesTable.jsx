@@ -38,6 +38,7 @@ export function CoproprietairesTable({
   renderNameExtra,
   emptyMessage,
   agSessionId,
+  pouvoirs = [],
 }) {
   // --- Recherche & pagination ---
   const [search, setSearch] = useState("");
@@ -332,19 +333,26 @@ export function CoproprietairesTable({
                   <td className="px-4 py-2.5 text-emerald-600 dark:text-emerald-400 font-mono">{formatTantiemes(c.tantiemes)}</td>
                   {showPresence && (
                     <td className="px-4 py-2.5">
-                      <button
-                        onClick={(e) => handleTogglePresence(e, c)}
-                        title="Cliquer pour valider la présence"
-                        disabled={!!togglingPresenceId}
-                        className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors disabled:opacity-50 ${
-                          c.presence
-                            ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/30"
-                            : "bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-600"
-                        }`}
-                      >
-                        <span className={`w-1.5 h-1.5 rounded-full ${c.presence ? "bg-emerald-500" : "bg-zinc-400 dark:bg-zinc-500"}`} />
-                        {togglingPresenceId === c.id ? "…" : c.presence ? "Présent" : "Absent"}
-                      </button>
+                      {pouvoirs.some((p) => p.mandant_id === c.id) ? (
+                        <span className="inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full bg-blue-500/15 text-blue-600 dark:text-blue-400">
+                          <span className="w-1.5 h-1.5 rounded-full bg-blue-500" />
+                          Représenté
+                        </span>
+                      ) : (
+                        <button
+                          onClick={(e) => handleTogglePresence(e, c)}
+                          title="Cliquer pour valider la présence"
+                          disabled={!!togglingPresenceId}
+                          className={`inline-flex items-center gap-1 text-xs px-2 py-0.5 rounded-full transition-colors disabled:opacity-50 ${
+                            c.presence
+                              ? "bg-emerald-500/20 text-emerald-600 dark:text-emerald-400 hover:bg-emerald-500/30"
+                              : "bg-zinc-100 dark:bg-zinc-700 text-zinc-500 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-600"
+                          }`}
+                        >
+                          <span className={`w-1.5 h-1.5 rounded-full ${c.presence ? "bg-emerald-500" : "bg-zinc-400 dark:bg-zinc-500"}`} />
+                          {togglingPresenceId === c.id ? "…" : c.presence ? "Présent" : "Absent"}
+                        </button>
+                      )}
                     </td>
                   )}
                   {extraColumns.map((col, i) => (
