@@ -24,6 +24,7 @@ import { CoprosTab } from "./tabs/CoprosTab";
 import { ResolutionsTab } from "./tabs/ResolutionsTab";
 import { PouvoirsTab } from "./tabs/PouvoirsTab";
 import { PVGenerator } from "../PVGenerator/PVGenerator";
+import { downloadPVDocx } from "../PVGenerator/PVDocx";
 import { Loader } from "../Loader/Loader";
 import { AlertModal } from "../components/AlertModal";
 
@@ -44,7 +45,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
   const closeModal = () => setAlertModal(null);
 
   const statut = agSession.statut;
-  const showDashboard = isLive(statut) || isTerminee(statut);
+  const showDashboard = isLive(statut);
   const showPouvoirs  = isVoteAnticipe(statut) || isLive(statut) || isTerminee(statut);
 
   const fetchAll = useCallback(async () => {
@@ -140,13 +141,25 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
   const handleEndAG = () => {
     setAlertModal({
       title: "Terminer l'AG ?",
-      message: "Toutes les résolutions en cours seront clôturées.",
+      message: "Toutes les résolutions en cours seront clôturées et le procès-verbal sera téléchargé automatiquement.",
       type: "confirm",
       buttons: [
         { label: "Annuler", variant: "secondary", onClick: closeModal },
         { label: "Terminer l'AG", variant: "danger", onClick: async () => {
           closeModal();
           setEnding(true);
+          // Snapshot avant le reset de présence — le PV doit refléter
+          // l'état de la séance, pas l'état post-clôture.
+          // Les résolutions en_cours sont normalisées en termine car
+          // closeAllActive va les clôturer juste après.
+          const pvSnapshot = {
+            resolutions: resolutions.map(r =>
+              r.statut === 'en_cours' ? { ...r, statut: 'termine' } : r
+            ),
+            votes: [...votes],
+            coproprietaires: [...coproprietaires],
+          };
+          await downloadPVDocx(pvSnapshot);
           await resolutionService.closeAllActive(agSession.id);
           await agSessionService.terminate(agSession.id);
           await coproprietaireService.resetAllPresence(copropriete.id);
@@ -166,7 +179,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
 
   const tabs = [
     ...(showDashboard ? [{ id: "dashboard", label: "Dashboard", icon: BarChart3 }] : []),
-    { id: "resolutions", label: isConstruction(statut) ? "Ordre du jour" : "Résolutions", icon: Vote },
+    { id: "resolutions", label: isConstruction(statut) ? "Ordre du jour" : isTerminee(statut) ? "Résultats" : "Résolutions", icon: Vote },
     ...(showPouvoirs ? [{ id: "pouvoirs", label: "Pouvoirs", icon: FileSignature, badge: pouvoirs.length || null }] : []),
   ];
 

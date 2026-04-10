@@ -16,7 +16,7 @@ import { voteService } from "../services/db";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { CoproprietairesTable } from "../CoproprietairesTable/CoproprietairesTable";
 
-export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs, syndicId, onCloseVote, onPresenceUpdate }) {
+export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs = [], syndicId, readOnly = false, onCloseVote, onPresenceUpdate }) {
   const [activeTab, setActiveTab] = useState("vote");
   const [invertMode, setInvertMode] = useState(false);
   const [submittingId, setSubmittingId] = useState(null);
@@ -101,7 +101,38 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs, sy
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eligibleVoters, votedIds, votesForRes]);
 
-  const totalEligible = score.pour + score.contre + score.abstention + score.pending;
+  // ── Mode lecture seule : liste et score depuis les votes DB ─────────────
+  // (les présences sont remises à false après clôture, eligibleVoters serait vide)
+  const readOnlyVoters = useMemo(() => {
+    if (!readOnly) return [];
+    const coprosById = Object.fromEntries(coproprietaires.map(c => [c.id, c]));
+    const order = { pour: 0, contre: 1, abstention: 2 };
+    return votesForRes
+      .map(v => ({ ...coprosById[v.coproprietaire_id], vote: v.choix }))
+      .filter(v => v?.id)
+      .sort((a, b) => (order[a.vote] ?? 3) - (order[b.vote] ?? 3) || a.nom.localeCompare(b.nom));
+  }, [readOnly, votesForRes, coproprietaires]);
+
+  const readOnlyScore = useMemo(() => {
+    if (!readOnly) return null;
+    const coprosById = Object.fromEntries(coproprietaires.map(c => [c.id, c]));
+    return votesForRes.reduce(
+      (acc, v) => {
+        const t = coprosById[v.coproprietaire_id]?.tantiemes || 0;
+        if (v.choix === 'pour') acc.pour += t;
+        else if (v.choix === 'contre') acc.contre += t;
+        else if (v.choix === 'abstention') acc.abstention += t;
+        return acc;
+      },
+      { pour: 0, contre: 0, abstention: 0, pending: 0 }
+    );
+  }, [readOnly, votesForRes, coproprietaires]);
+
+  const displayScore = readOnly ? readOnlyScore : score;
+
+  const totalEligible = readOnly
+    ? (readOnlyScore.pour + readOnlyScore.contre + readOnlyScore.abstention)
+    : score.pour + score.contre + score.abstention + score.pending;
   const pct = (n) => (totalEligible > 0 ? Math.round((n / totalEligible) * 100) : 0);
 
   // Nombre de votes non encore saisis (hors instructions verrouillées)
@@ -215,7 +246,8 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs, sy
   return (
     <div className="space-y-3">
 
-      {/* ── Onglets ── */}
+      {/* ── Onglets (masqués en lecture seule) ── */}
+      {!readOnly && (
       <div className="flex gap-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg p-1">
         <button
           onClick={() => setActiveTab("vote")}
@@ -247,6 +279,7 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs, sy
           </span>
         </button>
       </div>
+      )}
 
       {/* ── Onglet : Liste des présences ── */}
       {activeTab === "presences" && (
@@ -278,42 +311,29 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs, sy
         </div>
       )}
 
-      {/* ── Onglet : Vote en séance ── */}
-      {activeTab === "vote" && (
+      {/* ── Onglet : Vote ── */}
+      {(activeTab === "vote" || readOnly) && (
       <div className="space-y-3">
 
       {/* ── Barre de score ── */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-4 space-y-2.5">
         <div className="flex justify-between items-baseline text-xs text-zinc-500 mb-0.5">
-          <span className="font-medium text-zinc-700 dark:text-zinc-300">Résultat en temps réel</span>
-          <span>{formatTantiemes(totalEligible)} tantièmes éligibles</span>
+          <span className="font-medium text-zinc-700 dark:text-zinc-300">
+            {readOnly ? "Résultats du vote" : "Résultat en temps réel"}
+          </span>
+          <span>{formatTantiemes(totalEligible)} tantièmes {readOnly ? "exprimés" : "éligibles"}</span>
         </div>
 
         {/* Barre segmentée */}
         <div className="h-5 rounded-full overflow-hidden flex bg-zinc-100 dark:bg-zinc-800">
           {totalEligible > 0 && (
             <>
-              <div
-                className="h-full bg-emerald-500 transition-all duration-500"
-                style={{ width: `${pct(score.pour)}%` }}
-                title={`Pour : ${formatTantiemes(score.pour)}`}
-              />
-              <div
-                className="h-full bg-red-500 transition-all duration-500"
-                style={{ width: `${pct(score.contre)}%` }}
-                title={`Contre : ${formatTantiemes(score.contre)}`}
-              />
-              <div
-                className="h-full bg-zinc-400 transition-all duration-500"
-                style={{ width: `${pct(score.abstention)}%` }}
-                title={`Abstention : ${formatTantiemes(score.abstention)}`}
-              />
-              {/* Pending : représente les votes pas encore saisis */}
-              <div
-                className="h-full bg-zinc-200 dark:bg-zinc-700 transition-all duration-500"
-                style={{ width: `${pct(score.pending)}%` }}
-                title={`En attente : ${formatTantiemes(score.pending)}`}
-              />
+              <div className="h-full bg-emerald-500 transition-all duration-500" style={{ width: `${pct(displayScore.pour)}%` }} title={`Pour : ${formatTantiemes(displayScore.pour)}`} />
+              <div className="h-full bg-red-500 transition-all duration-500"     style={{ width: `${pct(displayScore.contre)}%` }} title={`Contre : ${formatTantiemes(displayScore.contre)}`} />
+              <div className="h-full bg-zinc-400 transition-all duration-500"    style={{ width: `${pct(displayScore.abstention)}%` }} title={`Abstention : ${formatTantiemes(displayScore.abstention)}`} />
+              {!readOnly && displayScore.pending > 0 && (
+                <div className="h-full bg-zinc-200 dark:bg-zinc-700 transition-all duration-500" style={{ width: `${pct(displayScore.pending)}%` }} title={`En attente : ${formatTantiemes(displayScore.pending)}`} />
+              )}
             </>
           )}
         </div>
@@ -322,155 +342,184 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs, sy
         <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs">
           <span className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-medium">
             <span className="w-2 h-2 rounded-full bg-emerald-500 shrink-0" />
-            POUR — {formatTantiemes(score.pour)} ({pct(score.pour)}%)
+            POUR — {formatTantiemes(displayScore.pour)} ({pct(displayScore.pour)}%)
           </span>
           <span className="flex items-center gap-1.5 text-red-600 dark:text-red-400 font-medium">
             <span className="w-2 h-2 rounded-full bg-red-500 shrink-0" />
-            CONTRE — {formatTantiemes(score.contre)} ({pct(score.contre)}%)
+            CONTRE — {formatTantiemes(displayScore.contre)} ({pct(displayScore.contre)}%)
           </span>
           <span className="flex items-center gap-1.5 text-zinc-500 dark:text-zinc-400">
             <span className="w-2 h-2 rounded-full bg-zinc-400 shrink-0" />
-            ABST. — {formatTantiemes(score.abstention)} ({pct(score.abstention)}%)
+            ABST. — {formatTantiemes(displayScore.abstention)} ({pct(displayScore.abstention)}%)
           </span>
-          {score.pending > 0 && (
+          {!readOnly && displayScore.pending > 0 && (
             <span className="flex items-center gap-1.5 text-zinc-400 dark:text-zinc-600">
               <span className="w-2 h-2 rounded-full bg-zinc-200 dark:bg-zinc-700 shrink-0" />
-              En attente — {formatTantiemes(score.pending)}
+              En attente — {formatTantiemes(displayScore.pending)}
             </span>
           )}
         </div>
       </div>
 
-      {/* ── Contrôles ── */}
-      <div className="flex items-center gap-3 flex-wrap">
-        <button
-          onClick={() => setInvertMode((v) => !v)}
-          className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border font-medium transition-all ${
-            invertMode
-              ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800/50"
-              : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700"
-          }`}
-        >
-          <Shuffle size={12} />
-          {invertMode ? "Mode inversé actif (défaut : CONTRE)" : "Basculer tout en CONTRE"}
-        </button>
-        {pendingCount > 0 && (
-          <span className="text-xs text-zinc-400">
-            {pendingCount} vote{pendingCount > 1 ? "s" : ""} non saisis — défaut :{" "}
-            <strong className={invertMode ? "text-red-500" : "text-emerald-500"}>
-              {defaultChoix.toUpperCase()}
-            </strong>
-          </span>
-        )}
-      </div>
+      {/* ── Contrôles (masqués en lecture seule) ── */}
+      {!readOnly && (
+        <div className="flex items-center gap-3 flex-wrap">
+          <button
+            onClick={() => setInvertMode((v) => !v)}
+            className={`flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg border font-medium transition-all ${
+              invertMode
+                ? "bg-red-500/10 text-red-600 dark:text-red-400 border-red-200 dark:border-red-800/50"
+                : "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 border-zinc-200 dark:border-zinc-700 hover:bg-zinc-200 dark:hover:bg-zinc-700"
+            }`}
+          >
+            <Shuffle size={12} />
+            {invertMode ? "Mode inversé actif (défaut : CONTRE)" : "Basculer tout en CONTRE"}
+          </button>
+          {pendingCount > 0 && (
+            <span className="text-xs text-zinc-400">
+              {pendingCount} vote{pendingCount > 1 ? "s" : ""} non saisis — défaut :{" "}
+              <strong className={invertMode ? "text-red-500" : "text-emerald-500"}>
+                {defaultChoix.toUpperCase()}
+              </strong>
+            </span>
+          )}
+        </div>
+      )}
 
       {/* ── Liste des votants ── */}
-      <CoproprietairesTable
-        coproprietaires={eligibleVoters}
-        hideEmail
-        emptyMessage="Aucun copropriétaire présent en séance."
-        renderNameExtra={(voter) => (
-          <>
-            {voter.mandants?.length > 0 && (
-              <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded font-medium">
-                {voter.mandants.length} pouvoir{voter.mandants.length > 1 ? "s" : ""}
-              </span>
-            )}
-            {(() => {
-              const dbVote = getDbVote(voter.id);
-              const isVoted = votedIds.has(voter.id);
-              if (isVoted && dbVote) return (
-                <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
-                  dbVote === "pour" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
-                  : dbVote === "contre" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
-                  : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
-                }`}>✓ {dbVote}</span>
+      {readOnly ? (
+        <CoproprietairesTable
+          coproprietaires={readOnlyVoters}
+          hideEmail
+          emptyMessage="Aucun vote enregistré pour cette résolution."
+          extraColumns={[{
+            header: "Vote",
+            cell: (voter) => {
+              const colors = {
+                pour:        "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
+                contre:      "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400",
+                abstention:  "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400",
+              };
+              return (
+                <div className="flex justify-end">
+                  <span className={`text-[11px] font-bold uppercase px-2.5 py-1 rounded-md ${colors[voter.vote] ?? ""}`}>
+                    {voter.vote}
+                  </span>
+                </div>
               );
-              return <span className="text-[10px] text-zinc-300 dark:text-zinc-600 italic">défaut : {defaultChoix}</span>;
-            })()}
-          </>
-        )}
-        extraColumns={[{
-          header: "Vote",
-          cell: (voter) => {
-            const dbVote = getDbVote(voter.id);
-            const effectiveVote = getEffectiveVote(voter.id);
-            const isVoted = votedIds.has(voter.id);
-            const isLoading = submittingId === voter.id;
-            return (
-              <div className="flex gap-1 justify-end">
-                {[
-                  { choix: "pour",       label: "Pour",   active: "bg-emerald-500 text-white shadow-sm", inactive: "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50", pending: "bg-emerald-100/70 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-500 ring-1 ring-inset ring-emerald-300 dark:ring-emerald-800" },
-                  { choix: "contre",     label: "Contre", active: "bg-red-500 text-white shadow-sm",     inactive: "bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50",         pending: "bg-red-100/70 dark:bg-red-900/20 text-red-600 dark:text-red-500 ring-1 ring-inset ring-red-300 dark:ring-red-800" },
-                  { choix: "abstention", label: "Abst.",  active: "bg-zinc-500 text-white shadow-sm",    inactive: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700",           pending: "bg-zinc-100/70 dark:bg-zinc-800/50 text-zinc-500 ring-1 ring-inset ring-zinc-300 dark:ring-zinc-700" },
-                ].map(({ choix, label, active, inactive, pending }) => {
-                  const isActive  = isVoted && dbVote === choix;
-                  const isPending = !isVoted && effectiveVote === choix;
-                  return (
-                    <button
-                      key={choix}
-                      onClick={(e) => { e.stopPropagation(); handleVote(voter, choix); }}
-                      disabled={isLoading || finalizing}
-                      className={`text-[11px] font-semibold px-2.5 py-1 rounded-md transition-all disabled:opacity-50 ${isActive ? active : isPending ? pending : inactive}`}
-                    >
-                      {isLoading ? "…" : label}
-                    </button>
-                  );
-                })}
-              </div>
-            );
-          },
-        }]}
-        renderSubRows={(voter) =>
-          voter.mandants?.map((mandant) => {
-            const mandantDbVote = getDbVote(mandant.id);
-            const mandantVoted  = votedIds.has(mandant.id);
-            return (
-              <tr key={mandant.id} className="border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-black/10">
-                <td colSpan={99} className="px-3 py-1.5 pl-8">
-                  <div className="flex items-center gap-2">
-                    <ChevronRight size={10} className="text-zinc-300 dark:text-zinc-700 shrink-0" />
-                    {mandant.isLocked
-                      ? <Lock size={10} className="text-amber-500 shrink-0" title="Vote verrouillé par instruction" />
-                      : <div className="w-2 h-2 rounded-full border border-dashed border-blue-300 dark:border-blue-700 shrink-0" title="Suit le vote de son mandataire" />
-                    }
-                    <span className="text-xs text-zinc-500 dark:text-zinc-400">{mandant.prenom} {mandant.nom}</span>
-                    <span className="text-[10px] text-zinc-400">{formatTantiemes(mandant.tantiemes)} tants.</span>
-                    {mandant.isLocked
-                      ? <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ml-1 ${
-                          mandant.instruction === "pour" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
-                          : mandant.instruction === "contre" ? "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"
-                          : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"
-                        }`}>Instruction : {mandant.instruction}</span>
-                      : <span className="text-[10px] text-blue-400 dark:text-blue-500 italic ml-1">suit {voter.prenom}</span>
-                    }
-                    {mandantVoted && mandantDbVote && (
-                      <span className={`text-[10px] font-bold ml-auto ${mandantDbVote === "pour" ? "text-emerald-500" : mandantDbVote === "contre" ? "text-red-500" : "text-zinc-400"}`}>✓</span>
-                    )}
-                  </div>
-                </td>
-              </tr>
-            );
-          })
-        }
-      />
+            },
+          }]}
+        />
+      ) : (
+        <CoproprietairesTable
+          coproprietaires={eligibleVoters}
+          hideEmail
+          emptyMessage="Aucun copropriétaire présent en séance."
+          renderNameExtra={(voter) => (
+            <>
+              {voter.mandants?.length > 0 && (
+                <span className="text-[10px] bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded font-medium">
+                  {voter.mandants.length} pouvoir{voter.mandants.length > 1 ? "s" : ""}
+                </span>
+              )}
+              {(() => {
+                const dbVote = getDbVote(voter.id);
+                const isVoted = votedIds.has(voter.id);
+                if (isVoted && dbVote) return (
+                  <span className={`text-[10px] font-bold uppercase px-1.5 py-0.5 rounded ${
+                    dbVote === "pour" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400"
+                    : dbVote === "contre" ? "bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400"
+                    : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400"
+                  }`}>✓ {dbVote}</span>
+                );
+                return <span className="text-[10px] text-zinc-300 dark:text-zinc-600 italic">défaut : {defaultChoix}</span>;
+              })()}
+            </>
+          )}
+          extraColumns={[{
+            header: "Vote",
+            cell: (voter) => {
+              const dbVote = getDbVote(voter.id);
+              const effectiveVote = getEffectiveVote(voter.id);
+              const isVoted = votedIds.has(voter.id);
+              const isLoading = submittingId === voter.id;
+              return (
+                <div className="flex gap-1 justify-end">
+                  {[
+                    { choix: "pour",       label: "Pour",   active: "bg-emerald-500 text-white shadow-sm", inactive: "bg-emerald-50 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-100 dark:hover:bg-emerald-900/50", pending: "bg-emerald-100/70 dark:bg-emerald-900/20 text-emerald-600 dark:text-emerald-500 ring-1 ring-inset ring-emerald-300 dark:ring-emerald-800" },
+                    { choix: "contre",     label: "Contre", active: "bg-red-500 text-white shadow-sm",     inactive: "bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-100 dark:hover:bg-red-900/50",         pending: "bg-red-100/70 dark:bg-red-900/20 text-red-600 dark:text-red-500 ring-1 ring-inset ring-red-300 dark:ring-red-800" },
+                    { choix: "abstention", label: "Abst.",  active: "bg-zinc-500 text-white shadow-sm",    inactive: "bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700",           pending: "bg-zinc-100/70 dark:bg-zinc-800/50 text-zinc-500 ring-1 ring-inset ring-zinc-300 dark:ring-zinc-700" },
+                  ].map(({ choix, label, active, inactive, pending }) => {
+                    const isActive  = isVoted && dbVote === choix;
+                    const isPending = !isVoted && effectiveVote === choix;
+                    return (
+                      <button
+                        key={choix}
+                        onClick={(e) => { e.stopPropagation(); handleVote(voter, choix); }}
+                        disabled={isLoading || finalizing}
+                        className={`text-[11px] font-semibold px-2.5 py-1 rounded-md transition-all disabled:opacity-50 ${isActive ? active : isPending ? pending : inactive}`}
+                      >
+                        {isLoading ? "…" : label}
+                      </button>
+                    );
+                  })}
+                </div>
+              );
+            },
+          }]}
+          renderSubRows={(voter) =>
+            voter.mandants?.map((mandant) => {
+              const mandantDbVote = getDbVote(mandant.id);
+              const mandantVoted  = votedIds.has(mandant.id);
+              return (
+                <tr key={mandant.id} className="border-t border-zinc-100 dark:border-zinc-800 bg-zinc-50/40 dark:bg-black/10">
+                  <td colSpan={99} className="px-3 py-1.5 pl-8">
+                    <div className="flex items-center gap-2">
+                      <ChevronRight size={10} className="text-zinc-300 dark:text-zinc-700 shrink-0" />
+                      {mandant.isLocked
+                        ? <Lock size={10} className="text-amber-500 shrink-0" title="Vote verrouillé par instruction" />
+                        : <div className="w-2 h-2 rounded-full border border-dashed border-blue-300 dark:border-blue-700 shrink-0" title="Suit le vote de son mandataire" />
+                      }
+                      <span className="text-xs text-zinc-500 dark:text-zinc-400">{mandant.prenom} {mandant.nom}</span>
+                      <span className="text-[10px] text-zinc-400">{formatTantiemes(mandant.tantiemes)} tants.</span>
+                      {mandant.isLocked
+                        ? <span className={`text-[10px] font-semibold uppercase px-1.5 py-0.5 rounded ml-1 ${
+                            mandant.instruction === "pour" ? "bg-emerald-50 text-emerald-700 dark:bg-emerald-900/20 dark:text-emerald-400"
+                            : mandant.instruction === "contre" ? "bg-red-50 text-red-700 dark:bg-red-900/20 dark:text-red-400"
+                            : "bg-zinc-100 text-zinc-500 dark:bg-zinc-800"
+                          }`}>Instruction : {mandant.instruction}</span>
+                        : <span className="text-[10px] text-blue-400 dark:text-blue-500 italic ml-1">suit {voter.prenom}</span>
+                      }
+                      {mandantVoted && mandantDbVote && (
+                        <span className={`text-[10px] font-bold ml-auto ${mandantDbVote === "pour" ? "text-emerald-500" : mandantDbVote === "contre" ? "text-red-500" : "text-zinc-400"}`}>✓</span>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              );
+            })
+          }
+        />
+      )}
 
-      {/* ── Pied : validation finale ── */}
-      <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-4">
-        <p className="text-xs text-zinc-400">
-          {pendingCount > 0
-            ? `${pendingCount} vote${pendingCount > 1 ? "s" : ""} non saisis → enregistrés en ${defaultChoix.toUpperCase()} à la clôture`
-            : "Tous les votes ont été enregistrés."}
-        </p>
-        <button
-          onClick={handleFinalize}
-          disabled={finalizing}
-          className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium transition-colors shrink-0"
-        >
-          <CheckCircle size={14} />
-          {finalizing ? "Finalisation…" : "Valider et clôturer"}
-        </button>
-      </div>
+      {/* ── Pied : validation finale (masqué en lecture seule) ── */}
+      {!readOnly && (
+        <div className="pt-3 border-t border-zinc-200 dark:border-zinc-800 flex items-center justify-between gap-4">
+          <p className="text-xs text-zinc-400">
+            {pendingCount > 0
+              ? `${pendingCount} vote${pendingCount > 1 ? "s" : ""} non saisis → enregistrés en ${defaultChoix.toUpperCase()} à la clôture`
+              : "Tous les votes ont été enregistrés."}
+          </p>
+          <button
+            onClick={handleFinalize}
+            disabled={finalizing}
+            className="flex items-center gap-1.5 text-xs bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white px-4 py-2 rounded-lg font-medium transition-colors shrink-0"
+          >
+            <CheckCircle size={14} />
+            {finalizing ? "Finalisation…" : "Valider et clôturer"}
+          </button>
+        </div>
+      )}
 
       </div>
       )}

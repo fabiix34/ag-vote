@@ -195,7 +195,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
       {/* --- FORMULAIRE D'AJOUT (masqué si AG terminée) --- */}
       {isReadOnly && (
         <div className="bg-zinc-50 dark:bg-zinc-800/50 border border-zinc-200 dark:border-zinc-700 rounded-xl px-4 py-3 text-sm text-zinc-500 dark:text-zinc-400">
-          Cette AG est terminée — les résolutions ne peuvent plus être modifiées.
+          AG clôturée — consultation des résultats en lecture seule.
         </div>
       )}
       {!isReadOnly && !canModifyAgenda && (

@@ -110,8 +110,19 @@ export function ResolutionCard({ resolution, votes: initialVotes = [], coproprie
         />
       )}
 
-      {/* Résultats après clôture ou pendant vote anticipé */}
-      {(resolution.statut === "termine" || showAnticipeResults) && (
+      {/* Détail des votes en lecture seule après clôture */}
+      {resolution.statut === "termine" && (
+        <VoteLivePanel
+          resolution={resolution}
+          votes={votes}
+          coproprietaires={coproprietaires}
+          pouvoirs={pouvoirs}
+          readOnly
+        />
+      )}
+
+      {/* Résultats pendant vote anticipé */}
+      {showAnticipeResults && resolution.statut !== "termine" && (
         <ResultatsResolution resolution={resolution} votes={votes} coproprietaires={coproprietaires} />
       )}
 
