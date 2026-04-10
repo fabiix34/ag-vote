@@ -17,9 +17,11 @@ import {
   Check,
   X,
   ArrowRight,
+  ShieldCheck,
 } from "lucide-react";
 import { coproprietaireService, agSessionService, coproprieteService } from "../services/db";
 import { CoprosTab } from "../AdminView/tabs/CoprosTab";
+import { AuditTab } from "./AuditTab";
 import { AlertModal } from "../components/AlertModal";
 
 const STATUS_INFO = {
@@ -111,6 +113,7 @@ export function CoproprieteSettings({ copropriete, onOpenAG, onBack }) {
   const tabs = [
     { id: "ag", label: "Assemblées générales", icon: Calendar },
     { id: "membres", label: "Copropriétaires", icon: Users },
+    { id: "audit", label: "Piste d'audit", icon: ShieldCheck },
   ];
 
   return (
@@ -216,6 +219,11 @@ export function CoproprieteSettings({ copropriete, onOpenAG, onBack }) {
                 </p>
                 <CoprosTab coproprietaires={coproprietaires} coproprieteId={copropriete.id} onSave={fetchCoproprietaires} onDelete={fetchCoproprietaires} />
               </div>
+            )}
+
+            {/* Onglet Audit */}
+            {tab === "audit" && (
+              <AuditTab agSessions={agSessions} coproprietaires={coproprietaires} />
             )}
 
             {/* Onglet AG */}
