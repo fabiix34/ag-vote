@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from "
 import { useDomain } from "./hooks/useDomain";
 import { supabase } from "./lib/supabase";
 import { syndicService, coproprieteService, agSessionService, coproprietaireService, auditLogsService } from "./services/db";
+import { AuditEvent } from "./utils/auditEvent";
 import { SyndicAuth } from "./SyndicAuth/SyndicAuth";
 import { SyndicDashboard } from "./SyndicDashboard/SyndicDashboard";
 import { CoproprieteSettings } from "./CoproprieteSettings/CoproprieteSettings";
@@ -186,7 +187,7 @@ function CoproVotePage() {
         if (profile) {
           await Promise.all([
             coproprietaireService.setPresence(profile.id, false),
-            auditLogsService.logAuthEvent(profile.id, agSession?.id ?? null, "AUTH_LOGOUT"),
+            auditLogsService.logAuthEvent(profile.id, agSession?.id ?? null, AuditEvent.AUTH_LOGOUT),
           ]);
         }
         localStorage.removeItem("copro_profile");

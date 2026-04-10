@@ -2,14 +2,14 @@ import { ResultatsResolution } from "../../ResultatsResolution/ResultatsResoluti
 import { formatTantiemes } from "../../hooks/formatTantieme";
 import { calcPourcentage } from "../../hooks/calcPourcentage";
 import { CoproprietairesTable } from "../../CoproprietairesTable/CoproprietairesTable";
-import { AG_STATUT } from "../../utils/agStatut";
+import { isLive, isVoteAnticipe } from "../../utils/agStatut";
 
 export function DashboardTab({ coproprietaires, resolutions, votes, agSession, pouvoirs = [] }) {
   const presents = coproprietaires.filter((c) => c.presence);
-  const isEnCours = agSession?.statut === AG_STATUT.EN_COURS;
+  const isEnCours = isLive(agSession?.statut);
 
   // Copros ayant déjà voté en anticipé (au moins une résolution)
-  const idsAyantVoteAnticipe = agSession?.statut === AG_STATUT.VOTE_ANTICIPE
+  const idsAyantVoteAnticipe = isVoteAnticipe(agSession?.statut)
     ? [...new Set(votes.map((v) => v.coproprietaire_id))]
     : [];
 
@@ -66,7 +66,7 @@ export function DashboardTab({ coproprietaires, resolutions, votes, agSession, p
       </div>}
 
       {/* Votes anticipés */}
-      {agSession?.statut === AG_STATUT.VOTE_ANTICIPE && idsAyantVoteAnticipe.length > 0 && (
+      {isVoteAnticipe(agSession?.statut) && idsAyantVoteAnticipe.length > 0 && (
         <div className="bg-blue-500/5 border border-blue-200 dark:border-blue-800/50 rounded-xl overflow-hidden">
           <div className="px-4 py-3 border-b border-blue-100 dark:border-blue-900/50 flex items-center justify-between">
             <h3 className="font-medium text-blue-800 dark:text-blue-300 text-sm">Votes par correspondance reçus</h3>

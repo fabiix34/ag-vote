@@ -18,7 +18,7 @@ import {
 import { QRCodeSVG } from "qrcode.react";
 import { useRealtime } from "../hooks/useRealtime";
 import { coproprietaireService, resolutionService, pouvoirService, voteService, agSessionService } from "../services/db";
-import { AG_STATUT } from "../utils/agStatut";
+import { AG_STATUT, isConstruction, isVoteAnticipe, isLive, isTerminee } from "../utils/agStatut";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CoprosTab } from "./tabs/CoprosTab";
 import { ResolutionsTab } from "./tabs/ResolutionsTab";
@@ -44,13 +44,8 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
   const closeModal = () => setAlertModal(null);
 
   const statut = agSession.statut;
-  const isConstruction = statut === AG_STATUT.PLANIFIEE;
-  const isAnticipe     = statut === AG_STATUT.VOTE_ANTICIPE;
-  const isLive         = statut === AG_STATUT.EN_COURS;
-  const isTerminee     = statut === AG_STATUT.TERMINEE;
-
-  const showDashboard = isLive || isTerminee;
-  const showPouvoirs  = isAnticipe || isLive || isTerminee;
+  const showDashboard = isLive(statut) || isTerminee(statut);
+  const showPouvoirs  = isVoteAnticipe(statut) || isLive(statut) || isTerminee(statut);
 
   const fetchAll = useCallback(async () => {
     const [{ data: copros }, { data: resols }, { data: pvrs }] = await Promise.all([
@@ -118,8 +113,8 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
 
   const handleToggleAnticipe = async () => {
     setTogglingAnticipe(true);
-    const newStatut = isAnticipe ? AG_STATUT.PLANIFIEE : AG_STATUT.VOTE_ANTICIPE;
-    if (isAnticipe) {
+    const newStatut = isVoteAnticipe(statut) ? AG_STATUT.PLANIFIEE : AG_STATUT.VOTE_ANTICIPE;
+    if (isVoteAnticipe(statut)) {
       await agSessionService.deactivateVoteAnticipe(agSession.id); // repasse à planifiee
     } else {
       await agSessionService.activateVoteAnticipe(agSession.id);
@@ -166,12 +161,12 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
   useEffect(() => {
     if (!showDashboard && tab === "dashboard") setTab("resolutions");
     if (!showPouvoirs && tab === "pouvoirs") setTab("resolutions");
-    if (showDashboard && isLive && tab === "resolutions") setTab("dashboard");
+    if (showDashboard && isLive(statut) && tab === "resolutions") setTab("dashboard");
   }, [agSession.statut]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const tabs = [
     ...(showDashboard ? [{ id: "dashboard", label: "Dashboard", icon: BarChart3 }] : []),
-    { id: "resolutions", label: isConstruction ? "Ordre du jour" : "Résolutions", icon: Vote },
+    { id: "resolutions", label: isConstruction(statut) ? "Ordre du jour" : "Résolutions", icon: Vote },
     ...(showPouvoirs ? [{ id: "pouvoirs", label: "Pouvoirs", icon: FileSignature, badge: pouvoirs.length || null }] : []),
   ];
 
@@ -209,9 +204,9 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
             <p className="text-xs text-zinc-500">
               AG du {dateStr} ·{" "}
               <span
-                className={isTerminee ? "text-zinc-400" : isAnticipe ? "text-blue-500" : "text-emerald-500"}
+                className={isTerminee(statut) ? "text-zinc-400" : isVoteAnticipe(statut) ? "text-blue-500" : "text-emerald-500"}
               >
-                {isTerminee ? "Terminée" : isConstruction ? "Planifiée" : isAnticipe ? "Vote anticipé" : "En cours"}
+                {isTerminee(statut) ? "Terminée" : isConstruction(statut) ? "Planifiée" : isVoteAnticipe(statut) ? "Vote anticipé" : "En cours"}
               </span>
             </p>
           </div>
@@ -229,7 +224,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
             {connected ? "Temps réel" : "Déconnecté"}
           </div>
 
-          {!loading && isTerminee && (
+          {!loading && isTerminee(statut) && (
             <PVGenerator
               resolutions={resolutions}
               votes={votes}
@@ -238,7 +233,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
           )}
 
           {/* Phase construction : activer vote anticipé + démarrer l'AG */}
-          {isConstruction && (
+          {isConstruction(statut) && (
             <>
               <button
                 onClick={handleToggleAnticipe}
@@ -260,7 +255,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
           )}
 
           {/* Phase vote anticipé : désactiver ou ouvrir la séance */}
-          {isAnticipe && (
+          {isVoteAnticipe(statut) && (
             <>
               <button
                 onClick={handleToggleAnticipe}
@@ -282,7 +277,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
           )}
 
           {/* Phase live : QR Code + terminer */}
-          {isLive && (
+          {isLive(statut) && (
             <>
               <button
                 onClick={() => setShowQR(!showQR)}
@@ -380,11 +375,11 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
                 pouvoirs={pouvoirs}
                 agSessionId={agSession.id}
                 syndicId={syndicId}
-                canModifyAgenda={isConstruction}
-                canEditResolution={isConstruction}
-                canLaunchVote={isLive}
-                showAnticipeResults={isAnticipe}
-                isReadOnly={isTerminee}
+                canModifyAgenda={isConstruction(statut)}
+                canEditResolution={isConstruction(statut)}
+                canLaunchVote={isLive(statut)}
+                showAnticipeResults={isVoteAnticipe(statut)}
+                isReadOnly={isTerminee(statut)}
                 onUpdate={fetchAll}
               />
             )}
@@ -394,8 +389,8 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
                 coproprietaires={coproprietaires}
                 resolutions={resolutions}
                 agSessionId={agSession.id}
-                canAdd={!isTerminee}
-                isReadOnly={!isConstruction}
+                canAdd={!isTerminee(statut)}
+                isReadOnly={!isConstruction(statut)}
                 onUpdate={fetchAll}
               />
             )}

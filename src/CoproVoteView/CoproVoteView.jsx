@@ -4,7 +4,7 @@ import { resolutionService, voteService, coproprietaireService, pouvoirService, 
 import { useRealtime } from "../hooks/useRealtime";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
-import { AG_STATUT } from "../utils/agStatut";
+import { isVoteAnticipe, isConstruction } from "../utils/agStatut";
 
 export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }) {
   const [agSession, setAgSession] = useState(initialAgSession);
@@ -196,7 +196,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
 
     // RPC atomique : vote + audit_log dans une seule transaction
     // VPC si période vote_anticipe, LIVE sinon
-    const isVpc = agSession.statut === AG_STATUT.VOTE_ANTICIPE;
+    const isVpc = isVoteAnticipe(agSession.statut);
     const submitFn = isVpc ? voteService.submitVpc : voteService.submitLive;
     const { error } = await submitFn(profile.id, resolutionId, choix, mandantIds);
 
@@ -365,7 +365,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
 
   const votableResolutions = resolutions.filter((r) => {
     if (r.statut === "termine") return false;
-    if (agSession?.statut === AG_STATUT.VOTE_ANTICIPE) return true; // vote anticipé : toutes sauf terminées
+    if (isVoteAnticipe(agSession?.statut)) return true; // vote anticipé : toutes sauf terminées
     return r.statut === "en_cours"; // séance live : seulement celles lancées par le syndic
   });
   const closedVotes = votes.filter((v) => !votableResolutions.find((r) => r.id === v.resolution_id));
@@ -642,7 +642,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
             <div className="w-16 h-16 rounded-full bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center mx-auto">
               <Vote size={28} className="text-zinc-400 dark:text-zinc-500" />
             </div>
-            {agSession.statut === AG_STATUT.PLANIFIEE ? (
+            {isConstruction(agSession.statut) ? (
               <>
                 <p className="text-zinc-700 dark:text-zinc-300 font-medium">L'AG n'a pas encore démarré</p>
                 <p className="text-zinc-500 text-sm">Vous serez notifié dès l'ouverture du vote</p>

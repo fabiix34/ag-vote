@@ -5,6 +5,7 @@
 import { useState } from "react";
 import { Vote, ChevronRight, AlertCircle, ArrowLeft } from "lucide-react";
 import { coproprietaireService, agSessionService, auditLogsService } from "../services/db";
+import { AuditEvent } from "../utils/auditEvent";
 
 export function CoproLogin({ onLogin, onBack = null }) {
   const [email, setEmail] = useState("");
@@ -39,7 +40,7 @@ export function CoproLogin({ onLogin, onBack = null }) {
     
     // 3. Marquer présent + logger la connexion (les deux appels sont fire-and-forget)
     await coproprietaireService.setPresence(data.id, true);
-    await auditLogsService.logAuthEvent(data.id, agSession?.id ?? null, "AUTH_LOGIN");
+    await auditLogsService.logAuthEvent(data.id, agSession?.id ?? null, AuditEvent.AUTH_LOGIN);
 
     localStorage.setItem("copro_profile", JSON.stringify(data));
     onLogin(data, agSession);

@@ -3,6 +3,7 @@
  * Les composants ne doivent jamais importer `supabase` directement.
  */
 import { supabase } from "../lib/supabase";
+import { AuditEvent } from "../utils/auditEvent";
 
 // ─── SYNDICS ────────────────────────────────────────────────────────────────
 
@@ -372,7 +373,7 @@ export const auditLogsService = {
       user_id:           mandantId,
       target_user_id:    mandataireId,
       action:            "pouvoir_cancelled_manual",
-      event_type:        "POWER_RECOVERED",
+      event_type:        AuditEvent.POWER_RECOVERED,
       details:           { pouvoir_id: pouvoirId, mandataire_id: mandataireId },
       payload:           { pouvoir_id: pouvoirId, mandataire_id: mandataireId, tantiemes_snapshot: tantiemes ?? 0 },
     }),
@@ -383,7 +384,7 @@ export const auditLogsService = {
     supabase.rpc("log_auth_event", {
       p_copro_id:      coproId,
       p_ag_session_id: agSessionId ?? null,
-      p_event_type:    eventType,   // 'AUTH_LOGIN' | 'AUTH_LOGOUT'
+      p_event_type:    eventType,   // AuditEvent.AUTH_LOGIN | AuditEvent.AUTH_LOGOUT
       p_metadata:      metadata,
     }),
 
@@ -394,7 +395,7 @@ export const auditLogsService = {
       coproprietaire_id: coproId,
       user_id:           coproId,
       action:            arrived ? "arrivee_physique" : "depart_physique",
-      event_type:        arrived ? "ATTENDANCE_ARRIVED" : "ATTENDANCE_LEFT",
+      event_type:        arrived ? AuditEvent.ATTENDANCE_ARRIVED : AuditEvent.ATTENDANCE_LEFT,
       details,
       payload:           details,
     }),
@@ -406,7 +407,7 @@ export const auditLogsService = {
       coproprietaire_id: mandantId,
       user_id:           mandantId,
       action:            "pouvoir_donne",
-      event_type:        "POWER_GRANTED",
+      event_type:        AuditEvent.POWER_GIVEN,
       details,
       payload:           details,
     }),
@@ -418,7 +419,7 @@ export const auditLogsService = {
       coproprietaire_id: coproId,
       user_id:           coproId,
       action:            "pouvoir_revoque",
-      event_type:        "POWER_REVOKED",
+      event_type:        AuditEvent.POWER_RECOVERED,
       details,
       payload:           details,
     }),
@@ -427,6 +428,11 @@ export const auditLogsService = {
     supabase.from("audit_logs").select("*")
       .eq("ag_session_id", agSessionId)
       .order("created_at", { ascending: true }),
+
+  fetchByCopropriete: (agSessionIds) =>
+    supabase.from("audit_logs").select("*")
+      .in("ag_session_id", agSessionIds)
+      .order("created_at", { ascending: false }),
 };
 
 // ─── DOCUMENTS ───────────────────────────────────────────────────────────────
