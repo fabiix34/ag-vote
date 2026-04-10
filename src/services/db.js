@@ -424,6 +424,30 @@ export const auditLogsService = {
       payload:           details,
     }),
 
+  // Pouvoir créé manuellement par le syndic
+  logPouvoirCreatedSyndic: (agSessionId, mandantId, details = {}) =>
+    supabase.from("audit_logs").insert({
+      ag_session_id:     agSessionId || null,
+      coproprietaire_id: mandantId,
+      user_id:           mandantId,
+      action:            "pouvoir_created_syndic",
+      event_type:        AuditEvent.POWER_CREATED_SYNDIC,
+      details,
+      payload:           details,
+    }),
+
+  // Pouvoir supprimé manuellement par le syndic (correction d'erreur)
+  logPouvoirDeletedSyndic: (agSessionId, mandantId, details = {}) =>
+    supabase.from("audit_logs").insert({
+      ag_session_id:     agSessionId || null,
+      coproprietaire_id: mandantId,
+      user_id:           mandantId,
+      action:            "pouvoir_deleted_syndic",
+      event_type:        AuditEvent.POWER_DELETED_SYNDIC,
+      details,
+      payload:           details,
+    }),
+
   fetchByAgSession: (agSessionId) =>
     supabase.from("audit_logs").select("*")
       .eq("ag_session_id", agSessionId)

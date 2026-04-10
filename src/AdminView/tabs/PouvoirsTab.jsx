@@ -1,14 +1,34 @@
 import { useState } from "react";
-import { ChevronDown, ChevronUp, FilePen, Plus, Trash2, X, Clock, Archive } from "lucide-react";
-import { pouvoirService, voteService } from "../../services/db";
+import { FilePen, Plus, Trash2, X, Clock, Archive } from "lucide-react";
+import { pouvoirService, voteService, auditLogsService } from "../../services/db";
 import { formatTantiemes } from "../../hooks/formatTantieme";
 import { AlertModal } from "../../components/AlertModal";
 
-const CHOIX_OPTS = [
-  { value: "", label: "— Laisse décider le mandataire —" },
-  { value: "pour", label: "Pour" },
-  { value: "contre", label: "Contre" },
-  { value: "abstention", label: "Abstention" },
+const VOTE_BUTTONS = [
+  {
+    choix: "pour",
+    label: "Pour",
+    active: "bg-emerald-600 text-white ring-2 ring-emerald-400/60",
+    idle: "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400 hover:bg-emerald-200 dark:hover:bg-emerald-800/40",
+  },
+  {
+    choix: "contre",
+    label: "Contre",
+    active: "bg-red-600 text-white ring-2 ring-red-400/60",
+    idle: "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400 hover:bg-red-200 dark:hover:bg-red-800/40",
+  },
+  {
+    choix: "abstention",
+    label: "Abst.",
+    active: "bg-zinc-600 text-white ring-2 ring-zinc-400/60",
+    idle: "bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-600",
+  },
+  {
+    choix: null,
+    label: "Libre",
+    active: "bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 ring-2 ring-blue-300/60",
+    idle: "bg-white dark:bg-zinc-800 text-zinc-400 dark:text-zinc-500 hover:bg-zinc-50 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-700",
+  },
 ];
 
 export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionId, canAdd = true, isReadOnly = false, onUpdate }) {
@@ -17,7 +37,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
   const [mandataireId, setMandataireId] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
-  const [expandedId, setExpandedId] = useState(null);
+  const [instructionsModal, setInstructionsModal] = useState(null); // pouvoir object or null
   const [editingVotes, setEditingVotes] = useState({}); // { pouvoirId: { resolutionId: choix } }
   const [savingVotes, setSavingVotes] = useState(null);
   const [deletingId, setDeletingId] = useState(null);
@@ -55,22 +75,44 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
     if (err) {
       setError(err.message);
     } else {
+      const mandant = copro(mandantId);
+      const mandataire = copro(mandataireId);
+      await auditLogsService.logPouvoirCreatedSyndic(agSessionId, mandantId, {
+        pouvoir_id:        data?.id ?? null,
+        mandataire_id:     mandataireId,
+        mandant_prenom:    mandant?.prenom,
+        mandant_nom:       mandant?.nom,
+        mandataire_prenom: mandataire?.prenom,
+        mandataire_nom:    mandataire?.nom,
+      });
       setShowModal(false);
       onUpdate();
     }
   };
 
-  const handleDelete = (id) => {
+  const handleDelete = (pouvoir) => {
+    const mandant = copro(pouvoir.mandant_id);
+    const mandataire = copro(pouvoir.mandataire_id);
     setAlertModal({
-      title: "Annuler ce pouvoir ?",
-      message: "La ligne sera conservée dans l'historique (audit trail).",
+      title: "Supprimer ce pouvoir ?",
+      message: "Cette action est enregistrée dans l'audit trail.",
       type: "confirm",
       buttons: [
         { label: "Annuler", variant: "secondary", onClick: closeModal },
         { label: "Confirmer", variant: "danger", onClick: async () => {
           closeModal();
-          setDeletingId(id);
-          await pouvoirService.softDelete(id);
+          setDeletingId(pouvoir.id);
+          await Promise.all([
+            pouvoirService.softDelete(pouvoir.id),
+            auditLogsService.logPouvoirDeletedSyndic(agSessionId, pouvoir.mandant_id, {
+              pouvoir_id:        pouvoir.id,
+              mandataire_id:     pouvoir.mandataire_id,
+              mandant_prenom:    mandant?.prenom,
+              mandant_nom:       mandant?.nom,
+              mandataire_prenom: mandataire?.prenom,
+              mandataire_nom:    mandataire?.nom,
+            }),
+          ]);
           setDeletingId(null);
           onUpdate();
         }},
@@ -100,20 +142,19 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
     return null;
   };
 
-  const handleToggleExpand = (id, currentVotes) => {
-    if (expandedId === id) {
-      setExpandedId(null);
-    } else {
-      setExpandedId(id);
-      // Initialise l'état d'édition avec les votes imposés actuels
-      setEditingVotes((prev) => ({ ...prev, [id]: { ...(currentVotes || {}) } }));
-    }
+  const handleOpenInstructions = (pouvoir) => {
+    setInstructionsModal(pouvoir);
+    setEditingVotes((prev) => ({ ...prev, [pouvoir.id]: { ...(pouvoir.votes_imposes || {}) } }));
+  };
+
+  const handleCloseInstructions = () => {
+    setInstructionsModal(null);
   };
 
   const handleVoteImpose = (pouvoirId, resolutionId, choix) => {
     setEditingVotes((prev) => {
       const current = { ...(prev[pouvoirId] || {}) };
-      if (choix === "") {
+      if (choix === null || choix === "") {
         delete current[resolutionId];
       } else {
         current[resolutionId] = choix;
@@ -129,13 +170,10 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
 
     const mandant = copro(pouvoir.mandant_id);
 
-    // Persiste les instructions sur le pouvoir
     const ops = [
       pouvoirService.updateVotesImposes(pouvoirId, newVotesImposes),
     ];
 
-    // Pour chaque instruction définie, enregistre immédiatement le vote du mandant
-    // afin qu'il ne puisse plus être écrasé par la cascade du mandataire
     for (const [resolutionId, choix] of Object.entries(newVotesImposes)) {
       if (choix && mandant) {
         ops.push(voteService.upsert(mandant.id, resolutionId, choix, mandant.tantiemes));
@@ -144,6 +182,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
 
     await Promise.all(ops);
     setSavingVotes(null);
+    setInstructionsModal(null);
     onUpdate();
   };
 
@@ -158,6 +197,7 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
         buttons={alertModal?.buttons ?? []}
         input={alertModal?.input ?? null}
       />
+
       {/* Header */}
       <div className="bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl overflow-hidden">
         <div className="px-5 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between">
@@ -196,127 +236,167 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
             {pouvoirs.map((p) => {
               const mandant = copro(p.mandant_id);
               const mandataire = copro(p.mandataire_id);
-              const isExpanded = expandedId === p.id;
               const nbImposes = Object.keys(p.votes_imposes || {}).length;
 
               return (
-                <div key={p.id}>
-                  {/* Ligne principale */}
-                  <div className="px-5 py-3 flex items-center gap-3">
-                    {/* Mandant */}
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-xs text-zinc-400 font-medium uppercase tracking-wide">Mandant</span>
-                        <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
-                          {mandant ? `${mandant.prenom} ${mandant.nom}` : "—"}
+                <div key={p.id} className="px-5 py-3 flex items-center gap-3">
+                  {/* Mandant */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-xs text-zinc-400 font-medium uppercase tracking-wide">Mandant</span>
+                      <span className="text-sm font-semibold text-zinc-800 dark:text-zinc-200">
+                        {mandant ? `${mandant.prenom} ${mandant.nom}` : "—"}
+                      </span>
+                      {mandant && (
+                        <span className="text-xs text-zinc-400 font-mono">
+                          {formatTantiemes(mandant.tantiemes)} tants.
                         </span>
-                        {mandant && (
-                          <span className="text-xs text-zinc-400 font-mono">
-                            {formatTantiemes(mandant.tantiemes)} tants.
-                          </span>
-                        )}
-                        {statutBadge(p)}
-                      </div>
-                      <div className="flex items-center gap-2 mt-0.5">
-                        <span className="text-xs text-zinc-400">donne pouvoir à</span>
-                        <span className="text-sm text-zinc-700 dark:text-zinc-300">
-                          {mandataire ? `${mandataire.prenom} ${mandataire.nom}` : "—"}
-                        </span>
-                      </div>
+                      )}
+                      {statutBadge(p)}
                     </div>
-
-                    {/* Infos votes imposés */}
-                    <div className="flex items-center gap-2 shrink-0">
-                      {nbImposes > 0 && (
-                        <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full font-medium">
-                          {nbImposes} vote{nbImposes > 1 ? "s" : ""} imposé{nbImposes > 1 ? "s" : ""}
-                        </span>
-                      )}
-                      {!isReadOnly && (
-                        <>
-                          <button
-                            onClick={() => handleToggleExpand(p.id, p.votes_imposes)}
-                            className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                            title="Configurer les votes imposés"
-                          >
-                            <FilePen size={12} />
-                            {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
-                          </button>
-                          <button
-                            onClick={() => handleDelete(p.id)}
-                            disabled={deletingId === p.id}
-                            className="text-zinc-400 hover:text-red-500 dark:hover:text-red-400 transition-colors disabled:opacity-40 p-1"
-                            title="Supprimer ce pouvoir"
-                          >
-                            <Trash2 size={14} />
-                          </button>
-                        </>
-                      )}
+                    <div className="flex items-center gap-2 mt-0.5">
+                      <span className="text-xs text-zinc-400">donne pouvoir à</span>
+                      <span className="text-sm text-zinc-700 dark:text-zinc-300">
+                        {mandataire ? `${mandataire.prenom} ${mandataire.nom}` : "—"}
+                      </span>
                     </div>
                   </div>
 
-                  {/* Section votes imposés (dépliable) */}
-                  {isExpanded && (
-                    <div className="px-5 pb-4 bg-zinc-50 dark:bg-zinc-800/30 border-t border-zinc-100 dark:border-zinc-800">
-                      <p className="text-xs text-zinc-500 pt-3 pb-2">
-                        Votes imposés par <strong className="text-zinc-700 dark:text-zinc-300">{mandant?.prenom} {mandant?.nom}</strong> — si non renseigné, le mandataire vote librement.
-                      </p>
-                      <div className="space-y-2">
-                        {resolutions.length === 0 ? (
-                          <p className="text-xs text-zinc-400 italic">Aucune résolution à l'ordre du jour.</p>
-                        ) : (
-                          resolutions.map((r) => {
-                            const current = editingVotes[p.id]?.[r.id] || "";
-                            // Instruction déjà sauvegardée en DB → verrouillée
-                            const locked = !!p.votes_imposes?.[r.id];
-                            return (
-                              <div key={r.id} className="flex items-center gap-3">
-                                <span className="flex-1 text-xs text-zinc-700 dark:text-zinc-300 truncate">
-                                  {r.titre}
-                                </span>
-                                {locked ? (
-                                  <span className={`text-xs font-semibold px-2.5 py-1 rounded-lg ${
-                                    p.votes_imposes[r.id] === "pour"
-                                      ? "bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400"
-                                      : p.votes_imposes[r.id] === "contre"
-                                      ? "bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400"
-                                      : "bg-zinc-100 dark:bg-zinc-700 text-zinc-600 dark:text-zinc-400"
-                                  }`}>
-                                    {p.votes_imposes[r.id].charAt(0).toUpperCase() + p.votes_imposes[r.id].slice(1)} — voté
-                                  </span>
-                                ) : (
-                                  <select
-                                    value={current}
-                                    onChange={(e) => handleVoteImpose(p.id, r.id, e.target.value)}
-                                    className="text-xs px-2 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200 focus:outline-none focus:ring-1 focus:ring-emerald-500"
-                                  >
-                                    {CHOIX_OPTS.map((o) => (
-                                      <option key={o.value} value={o.value}>{o.label}</option>
-                                    ))}
-                                  </select>
-                                )}
-                              </div>
-                            );
-                          })
-                        )}
-                      </div>
-                      <div className="flex justify-end pt-3">
-                        <button
-                          onClick={() => handleSaveVotesImposes(p.id)}
-                          disabled={savingVotes === p.id}
-                          className="text-xs bg-emerald-600 hover:bg-emerald-500 text-white px-3 py-1.5 rounded-lg font-medium transition-colors disabled:opacity-50"
-                        >
-                          {savingVotes === p.id ? "Enregistrement..." : "Sauvegarder les instructions"}
-                        </button>
-                      </div>
-                    </div>
-                  )}
+                  {/* Actions */}
+                  <div className="flex items-center gap-2 shrink-0">
+                    {nbImposes > 0 && (
+                      <span className="text-xs bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-2 py-0.5 rounded-full font-medium">
+                        {nbImposes} instruction{nbImposes > 1 ? "s" : ""}
+                      </span>
+                    )}
+                    {canAdd && (
+                      <button
+                        onClick={() => handleOpenInstructions(p)}
+                        className="flex items-center gap-1 text-xs text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 transition-colors px-2 py-1 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                        title="Instructions de vote"
+                      >
+                        <FilePen size={12} />
+                      </button>
+                    )}
+                    {canAdd && (
+                      <button
+                        onClick={() => handleDelete(p)}
+                        disabled={deletingId === p.id}
+                        className="text-zinc-400 hover:text-red-500 dark:hover:text-red-400 transition-colors disabled:opacity-40 p-1"
+                        title="Supprimer ce pouvoir"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    )}
+                  </div>
                 </div>
               );
             })}
           </div>
         )}
       </div>
+
+      {/* Modal instructions de vote */}
+      {instructionsModal && (() => {
+        const mandant = copro(instructionsModal.mandant_id);
+        const mandataire = copro(instructionsModal.mandataire_id);
+        return (
+          <div
+            className="fixed inset-0 bg-black/60 flex items-center justify-center z-50"
+            onClick={handleCloseInstructions}
+          >
+            <div
+              className="bg-white dark:bg-zinc-900 rounded-2xl w-full max-w-lg shadow-xl max-h-[85vh] flex flex-col overflow-hidden"
+              onClick={(e) => e.stopPropagation()}
+            >
+              {/* Header */}
+              <div className="px-5 py-4 border-b border-zinc-200 dark:border-zinc-800 flex items-center justify-between flex-shrink-0">
+                <div>
+                  <h3 className="font-semibold text-zinc-900 dark:text-white">Instructions de vote</h3>
+                  <p className="text-xs text-zinc-500 mt-0.5">
+                    <span className="font-medium text-zinc-700 dark:text-zinc-300">
+                      {mandant ? `${mandant.prenom} ${mandant.nom}` : "—"}
+                    </span>
+                    {" "}→{" "}
+                    {mandataire ? `${mandataire.prenom} ${mandataire.nom}` : "—"}
+                  </p>
+                </div>
+                <button onClick={handleCloseInstructions} className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-300">
+                  <X size={18} />
+                </button>
+              </div>
+
+              {/* Body */}
+              <div className="px-5 py-4 space-y-3 overflow-y-auto flex-1">
+                <p className="text-xs text-zinc-500">
+                  Indiquez le souhait du mandant par résolution. Sans instruction, le mandataire vote librement.
+                </p>
+                {resolutions.length === 0 ? (
+                  <p className="text-xs text-zinc-400 italic">Aucune résolution à l'ordre du jour.</p>
+                ) : (
+                  resolutions.map((r) => {
+                    const imposed = editingVotes[instructionsModal.id]?.[r.id] ?? null;
+                    return (
+                      <div key={r.id} className="bg-zinc-50 dark:bg-zinc-800/40 rounded-xl p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-2">
+                          <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200 leading-tight flex-1 min-w-0">
+                            {r.titre}
+                          </p>
+                          {r.statut === "en_cours" && (
+                            <span className="text-[10px] font-bold text-emerald-600 dark:text-emerald-400 bg-emerald-100 dark:bg-emerald-900/30 px-1.5 py-0.5 rounded-full shrink-0">
+                              En cours
+                            </span>
+                          )}
+                        </div>
+                        <div className="flex gap-1.5 flex-wrap">
+                          {VOTE_BUTTONS.map(({ choix, label, active, idle }) => {
+                            const isSelected = imposed === choix;
+                            return (
+                              <button
+                                key={choix ?? "libre"}
+                                onClick={() => handleVoteImpose(instructionsModal.id, r.id, choix)}
+                                className={`text-xs font-semibold px-3 py-1.5 rounded-lg transition-all ${isSelected ? active : idle}`}
+                              >
+                                {label}
+                              </button>
+                            );
+                          })}
+                        </div>
+                        {imposed && (
+                          <p className="text-[10px] text-zinc-500 dark:text-zinc-400">
+                            Le mandataire votera{" "}
+                            <span className="font-semibold text-zinc-700 dark:text-zinc-300">
+                              {imposed.toUpperCase()}
+                            </span>{" "}
+                            pour cette résolution.
+                          </p>
+                        )}
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Footer */}
+              <div className="px-5 py-4 border-t border-zinc-200 dark:border-zinc-800 flex justify-end gap-2 flex-shrink-0">
+                <button
+                  onClick={handleCloseInstructions}
+                  className="text-sm px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-800 transition-colors"
+                >
+                  Annuler
+                </button>
+                <button
+                  onClick={() => handleSaveVotesImposes(instructionsModal.id)}
+                  disabled={savingVotes === instructionsModal.id}
+                  className="text-sm px-4 py-2 rounded-lg bg-emerald-600 hover:bg-emerald-500 text-white font-medium transition-colors disabled:opacity-50"
+                >
+                  {savingVotes === instructionsModal.id ? "Enregistrement..." : "Enregistrer les instructions"}
+                </button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Modal ajout pouvoir */}
       {showModal && (

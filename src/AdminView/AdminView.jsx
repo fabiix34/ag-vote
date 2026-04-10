@@ -91,7 +91,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
   useRealtime("pouvoirs", (payload) => {
     if (payload.new?.ag_session_id !== agSession.id && payload.old?.ag_session_id !== agSession.id) return;
     setPouvoirs((prev) => {
-      if (payload.eventType === "INSERT") return [...prev, payload.new];
+      if (payload.eventType === "INSERT") return prev.some((p) => p.id === payload.new.id) ? prev : [...prev, payload.new];
       if (payload.eventType === "UPDATE")
         return prev.map((p) => (p.id === payload.new.id ? payload.new : p));
       if (payload.eventType === "DELETE")
