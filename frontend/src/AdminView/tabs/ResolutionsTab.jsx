@@ -169,7 +169,7 @@ export function ResolutionsTab({ resolutions, votes, coproprietaires, pouvoirs, 
     setIsSaving(true);
     try {
       await saveAsTemplate(newTitre.trim(), rawDesc.trim(), category);
-      const { data } = await templatesService.list();
+      const { data } = await templateService.fetchAll();
       setDbModeles(data);
       setAlertModal({
         title: "Modèle enregistré",

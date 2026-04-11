@@ -8,13 +8,11 @@
  */
 import { Router } from "express";
 import { documentService } from "../services/db.service.js";
-import { requireSyndic } from "../middleware/auth.js";
+import { requireSyndic, requireAuth } from "../middleware/auth.js";
 
 const router = Router();
 
-router.use(requireSyndic);
-
-router.get("/", async (req, res, next) => {
+router.get("/", requireAuth, async (req, res, next) => {
   try {
     const { resolutionId } = req.query;
     if (!resolutionId) return res.status(400).json({ error: "resolutionId est requis." });
@@ -28,7 +26,7 @@ router.get("/", async (req, res, next) => {
 });
 
 // Retourne des URLs signées pour une liste de chemins de stockage
-router.post("/signed-urls", async (req, res, next) => {
+router.post("/signed-urls", requireAuth, async (req, res, next) => {
   try {
     const { paths, expiresIn } = req.body;
     if (!Array.isArray(paths) || paths.length === 0) {
@@ -42,7 +40,7 @@ router.post("/signed-urls", async (req, res, next) => {
   }
 });
 
-router.post("/", async (req, res, next) => {
+router.post("/", requireSyndic, async (req, res, next) => {
   try {
     const { resolutionId, nom, path } = req.body;
     if (!resolutionId || !nom || !path) {
@@ -56,7 +54,7 @@ router.post("/", async (req, res, next) => {
   }
 });
 
-router.delete("/:id", async (req, res, next) => {
+router.delete("/:id", requireSyndic, async (req, res, next) => {
   try {
     const { error } = await documentService.delete(req.params.id);
     if (error) return res.status(500).json({ error: error.message });

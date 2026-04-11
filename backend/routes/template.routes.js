@@ -27,7 +27,6 @@ router.get("/", async (req, res, next) => {
 router.post("/", async (req, res, next) => {
   try {
     const { titre, description, categorie } = req.body;
-    console.log(req.body);
     if (!titre || !categorie || !description) {
       return res.status(400).json({ error: "titre, description et categorie sont requis." });
     }

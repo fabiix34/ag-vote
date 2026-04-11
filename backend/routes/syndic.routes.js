@@ -10,7 +10,7 @@ import { requireSyndic } from "../middleware/auth.js";
 
 const router = Router();
 
-router.get("/:id", requireSyndic, async (req, res, next) => {
+router.get("/:id", requireSyndic,async (req, res, next) => {
   try {
     if (req.syndicId !== req.params.id) {
       return res.status(403).json({ error: "Accès refusé." });

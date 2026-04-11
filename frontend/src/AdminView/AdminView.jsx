@@ -117,9 +117,10 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
   });
 
   const handleToggleAnticipe = async () => {
+    if(isVoteAnticipe(statut)) return;
     setTogglingAnticipe(true);
     const newStatut = isVoteAnticipe(statut) ? AG_STATUT.PLANIFIEE : AG_STATUT.VOTE_ANTICIPE;
-    await agService.updateVoteAnticipe(agSession.id, { activer: !isVoteAnticipe(statut) });
+    await agService.toggleVoteAnticipe(agSession.id, !isVoteAnticipe(statut));
     setAgSession((prev) => ({ ...prev, statut: newStatut }));
     setTogglingAnticipe(false);
   };
@@ -133,7 +134,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, onBack, on
 
   const handleOpenSession = async () => {
     setStarting(true);
-    await agService.updateVoteAnticipe(agSession.id, { activer: false });
+    await agService.toggleVoteAnticipe(agSession.id, false);
     setAgSession((prev) => ({ ...prev, statut: AG_STATUT.EN_COURS }));
     setStarting(false);
   };

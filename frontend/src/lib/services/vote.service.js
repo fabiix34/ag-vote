@@ -1,4 +1,5 @@
 import { api } from "../api";
+import { isVoteAnticipe } from "../../utils/agStatut.js";
 
 export const voteService = {
   fetchByResolutions: (resolutionIds) =>

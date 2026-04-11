@@ -173,7 +173,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
     if (!agSession?.id || pouvoirDonne) return; // mandant n'a pas de poids à calculer
     const activeResolution = resolutions.find((r) => r.statut === "en_cours");
     if (!activeResolution) { setVotingWeight(null); return; }
-    pouvoirService.getVotingWeight({ coproprietaireId: profile.id, resolutionId: activeResolution.id })
+    pouvoirService.getVotingWeight(profile.id, activeResolution.id)
       .then(({ data }) => setVotingWeight(data ?? null));
   }, [resolutions, agSession?.id, profile.id, pouvoirDonne]);
 

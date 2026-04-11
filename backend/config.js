@@ -8,8 +8,6 @@ const __dirname = dirname(fileURLToPath(import.meta.url));
 const env = process.env.NODE_ENV ?? "development";
 dotenvConfig({ path: resolve(__dirname, `.env.${env}`) });
 
-console.log(`Configuration chargée pour l'environnement : ${env}`);
-
 // 2. Export de l'objet config
 export const config = {
   port: Number(process.env.PORT) || 3001,
