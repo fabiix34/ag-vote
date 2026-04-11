@@ -1,6 +1,11 @@
 import { useState, useEffect } from "react";
 import { CheckCircle, XCircle, MinusCircle, LogOut, Vote, Check, Share2, Copy, UserCheck, X } from "lucide-react";
-import { resolutionService, voteService, coproprietaireService, pouvoirService, pouvoirTokenService, auditLogsService } from "../services/db";
+import { resolutionService } from "../lib/services/resolution.service";
+import { coproprietaireService } from "../lib/services/coproprietaire.service";
+import { voteService } from "../lib/services/vote.service";
+import { auditLogService } from "../lib/services/auditLog.service";
+import { pouvoirService } from "../lib/services/pouvoir.service";
+import { pouvoirTokenService } from "../lib/services/pouvoirToken.service";
 import { useRealtime } from "../hooks/useRealtime";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
@@ -35,7 +40,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
   const [pendingToken, setPendingToken] = useState(null);
   const [acceptingPouvoir, setAcceptingPouvoir] = useState(false);
   const [quotaError, setQuotaError] = useState(null); // message d'erreur quota art. 22
-  const [chainInfo, setChainInfo]   = useState(null); // info transfert en chaîne
+  const [chainInfo, setChainInfo] = useState(null); // info transfert en chaîne
 
   useEffect(() => {
     if (!agSession?.id) return;
@@ -43,8 +48,8 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
       resolutionService.fetchByAgSession(agSession.id),
       voteService.fetchByCopro(profile.id),
       coproprietaireService.fetchTantiemes(profile.copropriete_id),
-      pouvoirService.fetchForMandataire(agSession.id, profile.id),
-      pouvoirService.fetchDonne(agSession.id, profile.id),
+      pouvoirService.fetchForMandataire(profile.id,agSession.id),
+      pouvoirService.fetchDonne(profile.id,agSession.id),
     ]).then(([{ data: resols }, { data: myVotes }, { data: copros }, { data: pvrs }, { data: pdonne }]) => {
       setResolutions(resols || []);
       setVotes(myVotes || []);
@@ -58,13 +63,13 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
   useEffect(() => {
     const token = sessionStorage.getItem("pending_pouvoir_token");
     if (!token || !agSession?.id) return;
-    pouvoirTokenService.fetchPending(token, agSession.id).then(({ data }) => {
-        if (data && data.mandant_id !== profile.id) {
-          setPendingToken(data);
-        } else {
-          sessionStorage.removeItem("pending_pouvoir_token");
-        }
-      });
+    pouvoirTokenService.fetchPending({ token, agSessionId: agSession.id }).then(({ data }) => {
+      if (data && data.mandant_id !== profile.id) {
+        setPendingToken(data);
+      } else {
+        sessionStorage.removeItem("pending_pouvoir_token");
+      }
+    });
   }, [agSession?.id, profile.id]);
 
   // Mise à jour des pouvoirs en temps réel.
@@ -72,7 +77,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
   // un pouvoir pending_activation qui passe à active est mis à jour.
   useRealtime("pouvoirs", (payload) => {
     const concernsMandataire = payload.new?.mandataire_id === profile.id || payload.old?.mandataire_id === profile.id;
-    const concernsMandant    = payload.new?.mandant_id    === profile.id || payload.old?.mandant_id    === profile.id;
+    const concernsMandant = payload.new?.mandant_id === profile.id || payload.old?.mandant_id === profile.id;
     if (!concernsMandataire && !concernsMandant) return;
 
     if (concernsMandataire) {
@@ -99,7 +104,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
         // Le mandataire vient d'accepter : INSERT n'a pas les données jointes (mandataire).
         // On recharge pour récupérer le nom/prénom du mandataire.
         if (payload.new?.statut !== "cancelled" && payload.new?.statut !== "archived") {
-          pouvoirService.fetchDonne(agSession.id, profile.id)
+          pouvoirService.fetchDonne({ mandantId: profile.id, agSessionId: agSession.id })
             .then(({ data }) => setPouvoirDonne(data ?? null));
         }
       }
@@ -168,7 +173,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
     if (!agSession?.id || pouvoirDonne) return; // mandant n'a pas de poids à calculer
     const activeResolution = resolutions.find((r) => r.statut === "en_cours");
     if (!activeResolution) { setVotingWeight(null); return; }
-    pouvoirService.getVotingWeight(profile.id, activeResolution.id)
+    pouvoirService.getVotingWeight({ coproprietaireId: profile.id, resolutionId: activeResolution.id })
       .then(({ data }) => setVotingWeight(data ?? null));
   }, [resolutions, agSession?.id, profile.id, pouvoirDonne]);
 
@@ -182,9 +187,9 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
       resolution?.statut === "en_cours" && votingWeight?.mandants?.length
         ? votingWeight.mandants
         : pouvoirs
-            .filter((p) => p.statut === "active" || p.statut === "scheduled_stop")
-            .map((p) => p.mandant)
-            .filter(Boolean);
+          .filter((p) => p.statut === "active" || p.statut === "scheduled_stop")
+          .map((p) => p.mandant)
+          .filter(Boolean);
 
     // Exclure les mandants ayant une instruction de vote imposée
     const mandantIds = mandantsForThisResolution
@@ -194,12 +199,13 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
       })
       .map((m) => m.id);
 
-    // RPC atomique : vote + audit_log dans une seule transaction
-    // VPC si période vote_anticipe, LIVE sinon
-    const isVpc = isVoteAnticipe(agSession.statut);
-    const submitFn = isVpc ? voteService.submitVpc : voteService.submitLive;
-    const { error } = await submitFn(profile.id, resolutionId, choix, mandantIds);
-
+    const { data, error } = await voteService.submitCoproVote({
+      profile,
+      agSession,
+      resolutionId: resolution.id,
+      choix,
+      mandantIds: mandantIds
+    });
     if (!error) {
       const row = { coproprietaire_id: profile.id, resolution_id: resolutionId, choix, tantiemes_poids: profile.tantiemes };
       setVotes((prev) => {
@@ -217,9 +223,9 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
     if (!agSession?.id) return;
     setGeneratingPouvoir(true);
     // Récupère le token existant ou en crée un nouveau
-    let { data: existing } = await pouvoirTokenService.fetchExisting(profile.id, agSession.id);
+    let { data: existing } = await pouvoirTokenService.fetchExisting({ mandantId: profile.id, agSessionId: agSession.id });
     if (!existing) {
-      const { data: inserted } = await pouvoirTokenService.create(profile.id, agSession.id);
+      const { data: inserted } = await pouvoirTokenService.create({ mandantId: profile.id, agSessionId: agSession.id });
       existing = inserted;
     }
 
@@ -251,29 +257,31 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
     setQuotaError(null);
 
     // Pré-validation quota art. 22 côté frontend (le trigger DB bloque aussi, mais on veut un message lisible)
-    const { data: quota } = await pouvoirService.checkQuota(profile.id, agSession.id, pendingToken.mandant_id);
+    const { data: quota } = await pouvoirService.checkQuota({ mandataireId: profile.id, agSessionId: agSession.id, newMandantId: pendingToken.mandant_id });
     if (quota && !quota.allowed) {
       setQuotaError(quota.detail);
-      await auditLogsService.logQuotaViolation(agSession.id, profile.id, quota.detail);
+      await auditLogService.logQuotaViolation({ agSessionId: agSession.id, mandataireId: profile.id, detail: quota.detail });
       setAcceptingPouvoir(false);
       return;
     }
 
-    const { data: created, error } = await pouvoirService.createWithChain(pendingToken.mandant_id, profile.id, agSession.id);
+    const { data: created, error } = await pouvoirService.createWithChain({ mandantId: pendingToken.mandant_id, mandataireId: profile.id, agSessionId: agSession.id });
     if (!error) {
       await Promise.all([
-        pouvoirTokenService.markUsed(pendingToken.id),
-        auditLogsService.logPouvoirDonne(agSession.id, pendingToken.mandant_id, {
-          mandataire_id:     profile.id,
-          mandataire_prenom: profile.prenom,
-          mandataire_nom:    profile.nom,
-          statut:            created?.statut ?? "active",
-          chained_count:     created?.chained_count ?? 0,
+        pouvoirTokenService.use({ tokenId: pendingToken.id }),
+        auditLogService.logPouvoirDonne({
+          agSessionId: agSession.id, mandantId: pendingToken.mandant_id, details: {
+            mandataire_id: profile.id,
+            mandataire_prenom: profile.prenom,
+            mandataire_nom: profile.nom,
+            statut: created?.statut ?? "active",
+            chained_count: created?.chained_count ?? 0,
+          }
         }),
       ]);
       sessionStorage.removeItem("pending_pouvoir_token");
       setPendingToken(null);
-      const { data: pvrs } = await pouvoirService.fetchForMandataire(agSession.id, profile.id);
+      const { data: pvrs } = await pouvoirService.fetchForMandataire({ mandataireId: profile.id, agSessionId: agSession.id });
       setPouvoirs(pvrs || []);
       if (created?.chained_count > 0) {
         setChainInfo(`${created.chained_count} pouvoir(s) supplémentaire(s) transféré(s) par chaîne.`);
@@ -285,7 +293,7 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
   const handleRevokePouvoir = async () => {
     if (!pouvoirDonne) return;
     setRevokingPouvoir(true);
-    const mandataireId  = pouvoirDonne.mandataire?.id;
+    const mandataireId = pouvoirDonne.mandataire?.id;
     const mandataireNom = `${pouvoirDonne.mandataire?.prenom ?? ""} ${pouvoirDonne.mandataire?.nom ?? ""}`.trim();
 
     // N+1 seulement si un vote est activement en cours
@@ -294,24 +302,24 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
     let error;
     if (activeResolution) {
       // handle_power_recovery applique la règle N+1 : le pouvoir reste valide pour ce vote
-      const { data: result, error: rpcErr } = await pouvoirService.handleRecovery(profile.id, activeResolution.id);
+      const { data: result, error: rpcErr } = await pouvoirService.recovery({ coproId: profile.id, currentResolutionId: activeResolution.id });
       error = rpcErr ?? (result?.success === false ? new Error("RPC failed") : null);
     } else {
       // AG planifiée ou entre deux votes → annulation immédiate
-      const { error: delErr } = await pouvoirService.softDelete(pouvoirDonne.id);
+      const { error: delErr } = await pouvoirService.softDelete({ pouvoirId: pouvoirDonne.id });
       error = delErr;
     }
 
     if (!error) {
       await Promise.all([
-        auditLogsService.logPouvoirRevoque(agSession?.id ?? null, profile.id, {
-          mandataire_id:  mandataireId,
-          mandataire_nom: mandataireNom,
-          pivot_resolution: activeResolution?.id ?? null,
+        auditLogService.logPouvoirRevoque({
+          agSessionId: agSession?.id ?? null, coproId: profile.id, details: {
+            mandataire_id: mandataireId,
+            mandataire_nom: mandataireNom,
+            pivot_resolution: activeResolution?.id ?? null,
+          }
         }),
-        auditLogsService.logPouvoirCancelledManual(
-          agSession?.id ?? null, profile.id, pouvoirDonne.id, mandataireId,
-        ),
+        auditLogService.logPouvoirCancelledManual({ agSessionId: agSession?.id ?? null, mandantId: profile.id, pouvoirId: pouvoirDonne.id, mandataireId }),
       ]);
       setPouvoirDonne(null);
       setConfirmRevoke(false);
@@ -339,15 +347,15 @@ export function CoproVoteView({ profile, agSession: initialAgSession, onLogout }
     }
 
     const ops = [
-      pouvoirService.updateVotesImposes(pouvoirDonne.id, updated),
+      pouvoirService.updateVotesImposes({ pouvoirId: pouvoirDonne.id, votesImposes: updated }),
     ];
 
     if (choix !== null) {
       // Enregistre le vote directement — le mandataire ne cascadera pas pour ce mandant
-      ops.push(voteService.upsert(profile.id, resolutionId, choix, profile.tantiemes));
+      ops.push(voteService.upsert({ coproId: profile.id, resolutionId, choix, tantiemes: profile.tantiemes }));
     } else {
       // Supprime le vote direct pour que le mandataire puisse à nouveau voter librement pour ce mandant
-      ops.push(voteService.delete(profile.id, resolutionId));
+      ops.push(voteService.delete({ coproId: profile.id, resolutionId }));
     }
 
     const [{ error }] = await Promise.all(ops);

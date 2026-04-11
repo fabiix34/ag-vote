@@ -1,6 +1,6 @@
 import { useState, useEffect } from "react";
 import { ShieldCheck, ChevronDown, ChevronUp, Search } from "lucide-react";
-import { auditLogsService } from "../services/db";
+import { auditLogService } from "../lib/services/auditLog.service";
 import { AuditEvent } from "../utils/auditEvent";
 
 const EVENT_META = {
@@ -98,7 +98,7 @@ export function AuditTab({ agSessions, coproprietaires }) {
   useEffect(() => {
     if (agSessions.length === 0) { setLoading(false); return; }
     const ids = agSessions.map((ag) => ag.id);
-    auditLogsService.fetchByCopropriete(ids).then(({ data }) => {
+    auditLogService.fetchByCopropriete(ids).then(({ data }) => {
       setLogs(data ?? []);
       setLoading(false);
     });

@@ -1,14 +1,14 @@
 
 import { useState, useMemo } from "react";
 import { Edit3, Play, Trash2 } from "lucide-react";
-import { resolutionService } from "../services/db";
+import { resolutionService } from "../lib/services/resolution.service";
 import { useRealtime } from "../hooks/useRealtime";
 import { StatutBadge } from "../StatutBadge/StatutBadge";
 import { ResultatsResolution } from "../ResultatsResolution/ResultatsResolution";
 import { DocumentsSection } from "../DocumentSection/DocumentSection";
 import { VoteLivePanel } from "../VoteLivePanel/VoteLivePanel";
 
-export function ResolutionCard({ resolution, votes: initialVotes = [], coproprietaires, pouvoirs = [], syndicId, canModifyAgenda = false, canEditResolution = false, canLaunchVote = false, showAnticipeResults = false, onUpdate, onDelete }) {
+export function ResolutionCard({ resolution, votes: initialVotes = [], coproprietaires, pouvoirs = [], canModifyAgenda = false, canEditResolution = false, canLaunchVote = false, showAnticipeResults = false, onUpdate, onDelete }) {
   const [editing, setEditing] = useState(false);
 
   // ── Votes propres à cette résolution ────────────────────────────────────
@@ -105,7 +105,6 @@ export function ResolutionCard({ resolution, votes: initialVotes = [], coproprie
           votes={votes}
           coproprietaires={coproprietaires}
           pouvoirs={pouvoirs}
-          syndicId={syndicId}
           onCloseVote={() => handleStatutChange("termine")}
         />
       )}

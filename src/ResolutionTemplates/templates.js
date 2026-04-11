@@ -1,4 +1,4 @@
-import { templateService } from '../services/db';
+import { api } from '../lib/api';
 
 const PLACEHOLDER_RE = /\{\{([\w\u00C0-\u017F]+)\}\}/g;
 
@@ -49,9 +49,9 @@ export function formatLabel(key) {
 
 // --- Fonctions Database ---
 
-/** Récupère tous les modèles depuis Supabase */
+/** Récupère tous les modèles depuis le backend */
 export async function getModeles() {
-  const { data, error } = await templateService.fetchAll();
+  const { data, error } = await api.get("/templates");
   if (error) {
     console.error("Erreur lors de la récupération des modèles:", error);
     return [];
@@ -61,13 +61,13 @@ export async function getModeles() {
 
 /** Ajoute un nouveau modèle à la bibliothèque */
 export async function saveAsTemplate(titre, description, categorie) {
-  const { data, error } = await templateService.create(titre, description, categorie);
-  if (error) throw error;
-  return data[0];
+  const { data, error } = await api.post("/templates", { titre, description, categorie });
+  if (error) throw new Error(error.message);
+  return data;
 }
 
 /** Supprime un modèle */
 export async function deleteTemplate(id) {
-  const { error } = await templateService.delete(id);
-  if (error) throw error;
+  const { error } = await api.del(`/templates/${id}`);
+  if (error) throw new Error(error.message);
 }

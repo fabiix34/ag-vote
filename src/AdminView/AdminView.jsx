@@ -17,18 +17,22 @@ import {
 } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
 import { useRealtime } from "../hooks/useRealtime";
-import { coproprietaireService, resolutionService, pouvoirService, voteService, agSessionService } from "../services/db";
+import { downloadFile } from "../lib/api";
+import { coproprietaireService } from "../lib/services/coproprietaire.service";
+import { resolutionService } from "../lib/services/resolution.service";
+import { agService } from "../lib/services/ag.service";
+import { pouvoirService } from "../lib/services/pouvoir.service";
+import { voteService } from "../lib/services/vote.service";
 import { AG_STATUT, isConstruction, isVoteAnticipe, isLive, isTerminee } from "../utils/agStatut";
 import { DashboardTab } from "./tabs/DashboardTab";
 import { CoprosTab } from "./tabs/CoprosTab";
 import { ResolutionsTab } from "./tabs/ResolutionsTab";
 import { PouvoirsTab } from "./tabs/PouvoirsTab";
 import { PVGenerator } from "../PVGenerator/PVGenerator";
-import { downloadPVDocx } from "../PVGenerator/PVDocx";
 import { Loader } from "../Loader/Loader";
 import { AlertModal } from "../components/AlertModal";
 
-export function AdminView({ copropriete, agSession: initialAgSession, syndicId, onBack, onEndAG }) {
+export function AdminView({ copropriete, agSession: initialAgSession, onBack, onEndAG }) {
   const [agSession, setAgSession] = useState(initialAgSession);
   const [tab, setTab] = useState(initialAgSession.statut === AG_STATUT.PLANIFIEE ? "resolutions" : "dashboard");
   const [coproprietaires, setCoproprietaires] = useState([]);
@@ -46,7 +50,7 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
 
   const statut = agSession.statut;
   const showDashboard = isLive(statut);
-  const showPouvoirs  = isVoteAnticipe(statut) || isLive(statut) || isTerminee(statut);
+  const showPouvoirs = isVoteAnticipe(statut) || isLive(statut) || isTerminee(statut);
 
   const fetchAll = useCallback(async () => {
     const [{ data: copros }, { data: resols }, { data: pvrs }] = await Promise.all([
@@ -115,25 +119,21 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
   const handleToggleAnticipe = async () => {
     setTogglingAnticipe(true);
     const newStatut = isVoteAnticipe(statut) ? AG_STATUT.PLANIFIEE : AG_STATUT.VOTE_ANTICIPE;
-    if (isVoteAnticipe(statut)) {
-      await agSessionService.deactivateVoteAnticipe(agSession.id); // repasse à planifiee
-    } else {
-      await agSessionService.activateVoteAnticipe(agSession.id);
-    }
+    await agService.updateVoteAnticipe(agSession.id, { activer: !isVoteAnticipe(statut) });
     setAgSession((prev) => ({ ...prev, statut: newStatut }));
     setTogglingAnticipe(false);
   };
 
   const handleStartAG = async () => {
     setStarting(true);
-    await agSessionService.updateStatut(agSession.id, AG_STATUT.EN_COURS);
+    await agService.updateStatut(agSession.id, AG_STATUT.EN_COURS);
     setAgSession((prev) => ({ ...prev, statut: AG_STATUT.EN_COURS }));
     setStarting(false);
   };
 
   const handleOpenSession = async () => {
     setStarting(true);
-    await agSessionService.deactivateVoteAnticipe(agSession.id);
+    await agService.updateVoteAnticipe(agSession.id, { activer: false });
     setAgSession((prev) => ({ ...prev, statut: AG_STATUT.EN_COURS }));
     setStarting(false);
   };
@@ -145,27 +145,27 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
       type: "confirm",
       buttons: [
         { label: "Annuler", variant: "secondary", onClick: closeModal },
-        { label: "Terminer l'AG", variant: "danger", onClick: async () => {
-          closeModal();
-          setEnding(true);
-          // Snapshot avant le reset de présence — le PV doit refléter
-          // l'état de la séance, pas l'état post-clôture.
-          // Les résolutions en_cours sont normalisées en termine car
-          // closeAllActive va les clôturer juste après.
-          const pvSnapshot = {
-            resolutions: resolutions.map(r =>
-              r.statut === 'en_cours' ? { ...r, statut: 'termine' } : r
-            ),
-            votes: [...votes],
-            coproprietaires: [...coproprietaires],
-          };
-          await downloadPVDocx(pvSnapshot);
-          await resolutionService.closeAllActive(agSession.id);
-          await agSessionService.terminate(agSession.id);
-          await coproprietaireService.resetAllPresence(copropriete.id);
-          setEnding(false);
-          onEndAG();
-        }},
+        {
+          label: "Terminer l'AG", variant: "danger", onClick: async () => {
+            closeModal();
+            setEnding(true);
+            // Snapshot avant le reset de présence — le PV doit refléter
+            // l'état de la séance, pas l'état post-clôture.
+            // Les résolutions en_cours sont normalisées en termine car
+            // closeAllActive va les clôturer juste après.
+            const pvSnapshot = {
+              resolutions: resolutions.map(r =>
+                r.statut === 'en_cours' ? { ...r, statut: 'termine' } : r
+              ),
+              votes: [...votes],
+              coproprietaires: [...coproprietaires],
+            };
+            await downloadFile("/pv/generate", pvSnapshot, `PV-AG-${agSession.id}.docx`);
+            await agService.terminate(agSession.id, copropriete.id);
+            setEnding(false);
+            onEndAG();
+          }
+        },
       ],
     });
   };
@@ -227,11 +227,10 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
 
         <div className="flex items-center gap-2 flex-shrink-0">
           <div
-            className={`flex items-center gap-1.5 text-xs ${
-              connected
+            className={`flex items-center gap-1.5 text-xs ${connected
                 ? "text-emerald-500 dark:text-emerald-400"
                 : "text-red-500 dark:text-red-400"
-            }`}
+              }`}
           >
             {connected ? <Wifi size={14} /> : <WifiOff size={14} />}
             {connected ? "Temps réel" : "Déconnecté"}
@@ -345,11 +344,10 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${
-                tab === t.id
+              className={`flex items-center gap-1.5 px-4 py-3 text-sm font-medium border-b-2 transition-colors ${tab === t.id
                   ? "border-emerald-500 text-emerald-500 dark:text-emerald-400"
                   : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
-              }`}
+                }`}
             >
               <t.icon size={14} />
               {t.label}
@@ -387,7 +385,6 @@ export function AdminView({ copropriete, agSession: initialAgSession, syndicId, 
                 coproprietaires={coproprietaires}
                 pouvoirs={pouvoirs}
                 agSessionId={agSession.id}
-                syndicId={syndicId}
                 canModifyAgenda={isConstruction(statut)}
                 canEditResolution={isConstruction(statut)}
                 canLaunchVote={isLive(statut)}

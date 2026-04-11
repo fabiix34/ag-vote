@@ -4,7 +4,7 @@
 
 import { useState, useEffect } from "react";
 import { Shield, Plus, Building2, ArrowRight, LogOut, Users, Settings } from "lucide-react";
-import { coproprieteService } from "../services/db";
+import { coproprieteService } from "../lib/services/copropriete.service";
 import { ParametresModeles } from "./ParametresModeles";
 
 // ─── Onglet : Mes copropriétés ───────────────────────────────────────────────
@@ -27,7 +27,7 @@ function TabCoproprietes({ syndic, onSelectCopropriete }) {
   const handleCreate = async () => {
     if (!newNom.trim()) return;
     setCreating(true);
-    const { data, error } = await coproprieteService.create(syndic.id, newNom.trim(), newAdresse.trim());
+    const { data, error } = await coproprieteService.create({ syndicId: syndic.id, nom: newNom.trim(), adresse: newAdresse.trim() });
     if (!error && data) {
       setCoproprietes((prev) => [{ ...data, coproprietaires: [{ count: 0 }] }, ...prev]);
       setNewNom("");

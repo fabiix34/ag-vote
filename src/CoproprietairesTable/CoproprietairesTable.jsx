@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, Fragment } from "react";
 import { UserPlus, Trash2, X, Upload, ChevronDown } from "lucide-react";
 import * as XLSX from "xlsx";
-import { coproprietaireService, auditLogsService } from "../services/db";
+import { coproprietaireService } from "../lib/services/coproprietaire.service";
+import { auditLogService } from "../lib/services/auditLog.service";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { AlertModal } from "../components/AlertModal";
 
@@ -81,10 +82,7 @@ export function CoproprietairesTable({
     const newPresence = !c.presence;
     await coproprietaireService.setPresence(c.id, newPresence);
     if (agSessionId) {
-      await auditLogsService.logPresenceEvent(agSessionId, c.id, newPresence, {
-        nom: c.nom,
-        prenom: c.prenom,
-      });
+      await auditLogService.logPresence(c.id, agSessionId, newPresence, { nom: c.nom, prenom: c.prenom });
     }
     setTogglingPresenceId(null);
     onMutate?.();
@@ -156,7 +154,7 @@ export function CoproprietairesTable({
 
     const { error: err } = editingCopro
       ? await coproprietaireService.update(editingCopro.id, payload)
-      : await coproprietaireService.create(coproprieteId, payload);
+      : await coproprietaireService.create({ coproprieteId, ...payload });
 
     setSaving(false);
     if (err) {
@@ -193,7 +191,7 @@ export function CoproprietairesTable({
   const handleImport = async () => {
     setImporting(true);
     const rows = importPreview.map((r) => ({ ...r, copropriete_id: coproprieteId }));
-    const { error } = await coproprietaireService.upsertMany(rows);
+    const { error } = await coproprietaireService.importCoproprietaires(rows);
     setImporting(false);
     if (!error) {
       setShowImport(false);

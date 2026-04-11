@@ -2,7 +2,7 @@ import { useState, useEffect } from "react";
 import { BrowserRouter, Routes, Route, Navigate, useNavigate, useParams } from "react-router-dom";
 import { useDomain } from "./hooks/useDomain";
 import { supabase } from "./lib/supabase";
-import { syndicService, coproprieteService, agSessionService, coproprietaireService, auditLogsService } from "./services/db";
+import { api } from "./lib/api";
 import { AuditEvent } from "./utils/auditEvent";
 import { SyndicAuth } from "./SyndicAuth/SyndicAuth";
 import { SyndicDashboard } from "./SyndicDashboard/SyndicDashboard";
@@ -27,7 +27,7 @@ function PageLoader() {
 async function getSyndicFromSession() {
   const { data: { session } } = await supabase.auth.getSession();
   if (!session) return null;
-  const { data } = await syndicService.fetch(session.user.id);
+  const { data } = await api.get(`/syndics/${session.user.id}`);
   return data || null;
 }
 
@@ -84,7 +84,7 @@ function CoproprieteSettingsPage() {
     const load = async () => {
       const s = await getSyndicFromSession();
       if (!s) { navigate("/", { replace: true }); return; }
-      const { data: cp } = await coproprieteService.fetchById(id);
+      const { data: cp } = await api.get(`/coproprietes/${id}`);
       if (!cp) { navigate("/dashboard", { replace: true }); return; }
       setSyndic(s);
       setCopropriete(cp);
@@ -106,15 +106,13 @@ function AdminViewPage() {
   const { id } = useParams();
   const [copropriete, setCopropriete] = useState(null);
   const [agSession, setAgSession] = useState(null);
-  const [syndicId, setSyndicId] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
     const load = async () => {
       const s = await getSyndicFromSession();
       if (!s) { navigate("/", { replace: true }); return; }
-      setSyndicId(s.id);
-      const { data: ag } = await agSessionService.fetchWithCopropriete(id);
+      const { data: ag } = await api.get(`/ag/${id}`);
       if (!ag) { navigate("/dashboard", { replace: true }); return; }
       setAgSession(ag);
       setCopropriete(ag.coproprietes);
@@ -127,7 +125,6 @@ function AdminViewPage() {
     <AdminView
       copropriete={copropriete}
       agSession={agSession}
-      syndicId={syndicId}
       onBack={() => navigate(`/copropriete/${copropriete.id}`)}
       onEndAG={() => navigate(`/copropriete/${copropriete.id}`)}
     />
@@ -170,7 +167,7 @@ function CoproVotePage() {
       const p = JSON.parse(stored);
       setProfile(p);
       if (p.copropriete_id) {
-        const { data: ag } = await agSessionService.fetchActive(p.copropriete_id);
+        const { data: ag } = await api.get(`/ag/active/${p.copropriete_id}`);
         setAgSession(ag || null);
       }
       setReady(true);
@@ -186,8 +183,12 @@ function CoproVotePage() {
       onLogout={async () => {
         if (profile) {
           await Promise.all([
-            coproprietaireService.setPresence(profile.id, false),
-            auditLogsService.logAuthEvent(profile.id, agSession?.id ?? null, AuditEvent.AUTH_LOGOUT),
+            api.patch(`/coproprietaires/${profile.id}/presence`, { presence: false }),
+            api.post("/audit-logs/auth", {
+              coproId: profile.id,
+              agSessionId: agSession?.id ?? null,
+              eventType: AuditEvent.AUTH_LOGOUT,
+            }),
           ]);
         }
         localStorage.removeItem("copro_profile");

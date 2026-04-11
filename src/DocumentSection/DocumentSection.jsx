@@ -4,7 +4,7 @@
 // ============================================================
 import { useState, useRef, useEffect, useCallback } from "react";
 import { supabase } from "../lib/supabase";
-import { documentService } from "../services/db";
+import { documentService } from "../lib/services/document.service";
 import { Paperclip, Plus, AlertCircle, FileText, ExternalLink, Trash2 } from "lucide-react";
 
 export function DocumentsSection({ resolutionId, canManage }) {
@@ -42,7 +42,7 @@ export function DocumentsSection({ resolutionId, canManage }) {
       .from("resolution-docs")
       .upload(path, file);
     if (!storageError) {
-      const { error: dbError } = await documentService.create(resolutionId, file.name, path);
+      const { error: dbError } = await documentService.create({resolutionId : resolutionId, nom: file.name, path : path});
       if (dbError) {
         await supabase.storage.from("resolution-docs").remove([path]);
         setUploadError(dbError.message);

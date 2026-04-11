@@ -4,7 +4,7 @@
 
 import { useState, useEffect, useRef } from "react";
 import { Plus, FileText, Trash2, Tag, ChevronDown, ChevronUp, X, Save } from "lucide-react";
-import { templateService } from "../services/db";
+import { templateService } from "../lib/services/template.service";
 
 // ─── Combobox catégorie ───────────────────────────────────────────────────────
 
@@ -220,7 +220,7 @@ export function ParametresModeles() {
 
   const handleSave = async ({ titre, description, categorie }) => {
     if (modal?.mode === "edit") {
-      const { data, error } = await templateService.update(modal.template.id, titre, description, categorie);
+      const { data, error } = await templateService.update(modal.template.id, { titre, description, categorie });
       if (!error && data) {
         setTemplates((prev) =>
           prev.map((t) => (t.id === data.id ? data : t))
@@ -228,10 +228,10 @@ export function ParametresModeles() {
         );
       }
     } else {
-      const { data, error } = await templateService.create(titre, description, categorie);
-      if (!error && data?.[0]) {
+      const { data, error } = await templateService.create({ titre, description, categorie });
+      if (!error && data) {
         setTemplates((prev) =>
-          [...prev, data[0]].sort((a, b) => a.categorie.localeCompare(b.categorie))
+          [...prev, data].sort((a, b) => a.categorie.localeCompare(b.categorie))
         );
       }
     }

@@ -19,7 +19,9 @@ import {
   ArrowRight,
   ShieldCheck,
 } from "lucide-react";
-import { coproprietaireService, agSessionService, coproprieteService } from "../services/db";
+import { coproprietaireService } from "../lib/services/coproprietaire.service";
+import { agService } from "../lib/services/ag.service";
+import { coproprieteService } from "../lib/services/copropriete.service";
 import { CoprosTab } from "../AdminView/tabs/CoprosTab";
 import { AuditTab } from "./AuditTab";
 import { AlertModal } from "../components/AlertModal";
@@ -75,7 +77,7 @@ export function CoproprieteSettings({ copropriete, onOpenAG, onBack }) {
   const fetchAll = useCallback(async () => {
     const [, { data: ags }] = await Promise.all([
       fetchCoproprietaires(),
-      agSessionService.fetchByCopropriete(copropriete.id),
+      agService.fetchByCopropriete(copropriete.id),
     ]);
     setAgSessions(ags || []);
     setLoading(false);
@@ -87,7 +89,7 @@ export function CoproprieteSettings({ copropriete, onOpenAG, onBack }) {
 
   const handleCreateAG = async () => {
     setCreatingAG(true);
-    const { data, error } = await agSessionService.create(copropriete.id, newAGDate);
+    const { data, error } = await agService.create({ coproprieteId: copropriete.id, dateAg: newAGDate });
     if (!error && data) {
       setAgSessions((prev) => [data, ...prev]);
       setShowNewAG(false);
@@ -104,7 +106,7 @@ export function CoproprieteSettings({ copropriete, onOpenAG, onBack }) {
       return;
     }
     setSavingNom(true);
-    await coproprieteService.updateNom(copropriete.id, nomValue.trim());
+    await coproprieteService.update(copropriete.id, { nom: nomValue.trim() });
     copropriete.nom = nomValue.trim();
     setEditingNom(false);
     setSavingNom(false);

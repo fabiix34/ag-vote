@@ -12,11 +12,12 @@
 
 import { useMemo, useState } from "react";
 import { Lock, Shuffle, CheckCircle, ChevronRight, Users, Vote } from "lucide-react";
-import { voteService } from "../services/db";
+import { api } from "../lib/api";
+import { voteService } from "../lib/services/vote.service";
 import { formatTantiemes } from "../hooks/formatTantieme";
 import { CoproprietairesTable } from "../CoproprietairesTable/CoproprietairesTable";
 
-export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs = [], syndicId, readOnly = false, onCloseVote, onPresenceUpdate }) {
+export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs = [], readOnly = false, onCloseVote, onPresenceUpdate }) {
   const [activeTab, setActiveTab] = useState("vote");
   const [invertMode, setInvertMode] = useState(false);
   const [submittingId, setSubmittingId] = useState(null);
@@ -150,14 +151,13 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs = [
       .filter((m) => !m.isLocked)
       .map((m) => m.id);
 
-    await voteService.submitManualSyndic(
-      syndicId,
-      voter.id,
-      resolution.id,
+    await voteService.submitSyndic({
+      coproId: voter.id,
+      resolutionId: resolution.id,
       choix,
-      freeMandantIds,
-      { source: "live_panel" }
-    );
+      mandantIds: freeMandantIds,
+      metadata: { source: "live_panel" },
+    });
     setSubmittingId(null);
   };
 
@@ -182,27 +182,25 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs = [
       if (!freshVotedIds.has(voter.id)) {
         // Voter non soumis → soumettre avec le défaut + cascade mandants libres
         promises.push(
-          voteService.submitManualSyndic(
-            syndicId,
-            voter.id,
-            resolution.id,
-            defaultChoix,
-            freePendingMandantIds,
-            { source: "live_panel_finalize" }
-          )
+          voteService.submitSyndic({
+            coproId: voter.id,
+            resolutionId: resolution.id,
+            choix: defaultChoix,
+            mandantIds: freePendingMandantIds,
+            metadata: { source: "live_panel_finalize" },
+          })
         );
       } else if (freePendingMandantIds.length > 0) {
         // Voter déjà soumis mais mandants libres orphelins → soumettre séparément
         for (const mId of freePendingMandantIds) {
           promises.push(
-            voteService.submitManualSyndic(
-              syndicId,
-              mId,
-              resolution.id,
-              defaultChoix,
-              [],
-              { source: "live_panel_finalize_orphan" }
-            )
+            voteService.submitSyndic({
+              coproId: mId,
+              resolutionId: resolution.id,
+              choix: defaultChoix,
+              mandantIds: [],
+              metadata: { source: "live_panel_finalize_orphan" },
+            })
           );
         }
       }
@@ -210,14 +208,13 @@ export function VoteLivePanel({ resolution, votes, coproprietaires, pouvoirs = [
       // Instructions verrouillées non encore soumises → exécuter l'instruction
       for (const m of voter.mandants.filter((m) => m.isLocked && !freshVotedIds.has(m.id))) {
         promises.push(
-          voteService.submitManualSyndic(
-            syndicId,
-            m.id,
-            resolution.id,
-            m.instruction,
-            [],
-            { source: "live_panel_finalize_instruction" }
-          )
+          voteService.submitSyndic({
+            coproId: m.id,
+            resolutionId: resolution.id,
+            choix: m.instruction,
+            mandantIds: [],
+            metadata: { source: "live_panel_finalize_instruction" },
+          })
         );
       }
     }

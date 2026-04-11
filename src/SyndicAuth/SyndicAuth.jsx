@@ -5,7 +5,8 @@
 import { useState } from "react";
 import { Shield, ArrowLeft, Eye, EyeOff } from "lucide-react";
 import { supabase } from "../lib/supabase";
-import { syndicService } from "../services/db";
+import { api } from "../lib/api";
+import { syndicService } from "../lib/services/syndic.service";
 
 export function SyndicAuth({ onSuccess, onBack = null }) {
   const [mode, setMode] = useState("login"); // 'login' | 'register'
@@ -62,7 +63,12 @@ export function SyndicAuth({ onSuccess, onBack = null }) {
         setLoading(false);
         return;
       }
-      const { data: syndic, error: insertErr } = await syndicService.create(data.user.id, email.trim(), nom.trim(), prenom.trim());
+      const { data: syndic, error: insertErr } = await syndicService.create({
+        userId: data.user.id,
+        email: email.trim(),
+        nom: nom.trim(),
+        prenom: prenom.trim(),
+      });
       if (insertErr) {
         setError("Erreur lors de la création du profil syndic");
         setLoading(false);

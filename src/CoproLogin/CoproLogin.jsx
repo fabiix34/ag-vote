@@ -4,7 +4,10 @@
 
 import { useState } from "react";
 import { Vote, ChevronRight, AlertCircle, ArrowLeft } from "lucide-react";
-import { coproprietaireService, agSessionService, auditLogsService } from "../services/db";
+import { authService } from "../lib/services/auth.service";
+import { coproprietaireService } from "../lib/services/coproprietaire.service";
+import { auditLogService } from "../lib/services/auditLog.service";
+import { agService } from "../lib/services/ag.service";
 import { AuditEvent } from "../utils/auditEvent";
 
 export function CoproLogin({ onLogin, onBack = null }) {
@@ -22,28 +25,28 @@ export function CoproLogin({ onLogin, onBack = null }) {
     setError("");
 
     // 1. Trouver le coproprietaire
-    const { data, error: err } = await coproprietaireService.fetchByLogin(email, dateNaissance);
+    const { data: { copro }, error: err } = await authService.coproLogin({ email, dateNaissance });
 
-    if (err || !data) {
+    if (err || !copro) {
       setError("Identifiants incorrects. Vérifiez votre email et date de naissance.");
       setLoading(false);
       return;
     }
 
-    // 2. Trouver l'AG active de leur copropriété
+    localStorage.setItem("copro_profile", JSON.stringify(copro));
+
+    // 3. Trouver l'AG active de leur copropriété
     let agSession = null;
-    if (data.copropriete_id) {
-      const { data: ag } = await agSessionService.fetchActive(data.copropriete_id);
+    if (copro.copropriete_id) {
+      const { data: ag } = await agService.fetchActive(copro.copropriete_id);
       agSession = ag || null;
     }
 
-    
-    // 3. Marquer présent + logger la connexion (les deux appels sont fire-and-forget)
-    await coproprietaireService.setPresence(data.id, true);
-    await auditLogsService.logAuthEvent(data.id, agSession?.id ?? null, AuditEvent.AUTH_LOGIN);
+    // 4. Marquer présent + logger la connexion
+    await coproprietaireService.setPresence(copro.id, true);
+    await auditLogService.logAuth({ coproId: copro.id, agSessionId: agSession?.id ?? null, eventType: AuditEvent.AUTH_LOGIN });
 
-    localStorage.setItem("copro_profile", JSON.stringify(data));
-    onLogin(data, agSession);
+    onLogin(copro, agSession);
   };
 
   const handleDateChange = (val) => {

@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { FilePen, Plus, Trash2, X, Clock, Archive } from "lucide-react";
-import { pouvoirService, voteService, auditLogsService } from "../../services/db";
+import { FilePen, Plus, Trash2, X, Clock, Archive, AwardIcon } from "lucide-react";
+import { api } from "../../lib/api";
+import { pouvoirService } from "../../lib/services/pouvoir.service";
+import { auditLogService } from "../../lib/services/auditLog.service";
 import { formatTantiemes } from "../../hooks/formatTantieme";
 import { AlertModal } from "../../components/AlertModal";
 
@@ -70,20 +72,23 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
     }
     setSaving(true);
     setError(null);
-    const { data, error: err } = await pouvoirService.createWithChain(mandantId, mandataireId, agSessionId);
+
+    const { data, error: err } = await pouvoirService.createWithChain({ mandantId, mandataireId, agSessionId });
     setSaving(false);
     if (err) {
       setError(err.message);
     } else {
       const mandant = copro(mandantId);
       const mandataire = copro(mandataireId);
-      await auditLogsService.logPouvoirCreatedSyndic(agSessionId, mandantId, {
-        pouvoir_id:        data?.id ?? null,
-        mandataire_id:     mandataireId,
-        mandant_prenom:    mandant?.prenom,
-        mandant_nom:       mandant?.nom,
-        mandataire_prenom: mandataire?.prenom,
-        mandataire_nom:    mandataire?.nom,
+      await auditLogService.logPouvoirCreatedSyndic({
+        agSessionId, mandantId, details: {
+          pouvoir_id: data?.id ?? null,
+          mandataire_id: mandataireId,
+          mandant_prenom: mandant?.prenom,
+          mandant_nom: mandant?.nom,
+          mandataire_prenom: mandataire?.prenom,
+          mandataire_nom: mandataire?.nom,
+        }
       });
       setShowModal(false);
       onUpdate();
@@ -99,23 +104,27 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
       type: "confirm",
       buttons: [
         { label: "Annuler", variant: "secondary", onClick: closeModal },
-        { label: "Confirmer", variant: "danger", onClick: async () => {
-          closeModal();
-          setDeletingId(pouvoir.id);
-          await Promise.all([
-            pouvoirService.softDelete(pouvoir.id),
-            auditLogsService.logPouvoirDeletedSyndic(agSessionId, pouvoir.mandant_id, {
-              pouvoir_id:        pouvoir.id,
-              mandataire_id:     pouvoir.mandataire_id,
-              mandant_prenom:    mandant?.prenom,
-              mandant_nom:       mandant?.nom,
-              mandataire_prenom: mandataire?.prenom,
-              mandataire_nom:    mandataire?.nom,
-            }),
-          ]);
-          setDeletingId(null);
-          onUpdate();
-        }},
+        {
+          label: "Confirmer", variant: "danger", onClick: async () => {
+            closeModal();
+            setDeletingId(pouvoir.id);
+            await Promise.all([
+              pouvoirService.softDelete(pouvoir.id),
+              auditLogService.logPouvoirDeletedSyndic({
+                agSessionId, mandantId: pouvoir.mandant_id, details: {
+                  pouvoir_id: pouvoir.id,
+                  mandataire_id: pouvoir.mandataire_id,
+                  mandant_prenom: mandant?.prenom,
+                  mandant_nom: mandant?.nom,
+                  mandataire_prenom: mandataire?.prenom,
+                  mandataire_nom: mandataire?.nom,
+                }
+              }),
+            ]);
+            setDeletingId(null);
+            onUpdate();
+          }
+        },
       ],
     });
   };
@@ -171,12 +180,12 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
     const mandant = copro(pouvoir.mandant_id);
 
     const ops = [
-      pouvoirService.updateVotesImposes(pouvoirId, newVotesImposes),
+      api.patch(`/pouvoirs/${pouvoirId}/votes-imposes`, { votesImposes: newVotesImposes }),
     ];
 
     for (const [resolutionId, choix] of Object.entries(newVotesImposes)) {
       if (choix && mandant) {
-        ops.push(voteService.upsert(mandant.id, resolutionId, choix, mandant.tantiemes));
+        ops.push(api.post("/votes/upsert", { coproId: mandant.id, resolutionId, choix, tantiemes: mandant.tantiemes }));
       }
     }
 
@@ -209,8 +218,8 @@ export function PouvoirsTab({ pouvoirs, coproprietaires, resolutions, agSessionI
               {!canAdd
                 ? "L'AG est terminée — aucun pouvoir ne peut plus être enregistré."
                 : isReadOnly
-                ? "Séance en cours — vous pouvez encore enregistrer un pouvoir."
-                : "Délégations enregistrées pour cette AG"}
+                  ? "Séance en cours — vous pouvez encore enregistrer un pouvoir."
+                  : "Délégations enregistrées pour cette AG"}
             </p>
           </div>
           {canAdd && (
