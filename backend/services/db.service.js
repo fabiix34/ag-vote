@@ -503,12 +503,12 @@ export const templateService = {
       .select("*")
       .order("categorie", { ascending: true }),
 
-  create: (titre, description, categorie) =>
+  create: ({ titre, description, categorie }) =>
     db.from("resolution_templates")
-      .insert([{ titre, description, categorie, is_custom: true }])
+      .insert([{ titre, description, categorie}])
       .select(),
 
-  update: (id, titre, description, categorie) =>
+  update: (id, { titre, description, categorie }) =>
     db.from("resolution_templates")
       .update({ titre, description, categorie })
       .eq("id", id)

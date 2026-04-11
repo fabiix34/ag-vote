@@ -216,7 +216,7 @@ export function ParametresModeles() {
   }, {});
 
   const toggleCategory = (cat) =>
-    setExpandedCategories((prev) => ({ ...prev, [cat]: !prev[cat] }));
+    setExpandedCategories((prev) => ({ ...prev, [cat]: !(prev[cat] !== false) }));
 
   const handleSave = async ({ titre, description, categorie }) => {
     if (modal?.mode === "edit") {
@@ -231,7 +231,7 @@ export function ParametresModeles() {
       const { data, error } = await templateService.create({ titre, description, categorie });
       if (!error && data) {
         setTemplates((prev) =>
-          [...prev, data].sort((a, b) => a.categorie.localeCompare(b.categorie))
+          [...prev, data[0]].sort((a, b) => a.categorie.localeCompare(b.categorie))
         );
       }
     }
@@ -298,10 +298,10 @@ export function ParametresModeles() {
                 {isOpen && (
                   <div className="border-t border-zinc-100 dark:border-zinc-800 divide-y divide-zinc-100 dark:divide-zinc-800">
                     {items.map((t) => (
-                      <button
+                      <div
                         key={t.id}
                         onClick={() => setModal({ mode: "edit", template: t })}
-                        className="w-full px-5 py-4 flex items-start justify-between gap-4 group text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors"
+                        className="w-full px-5 py-4 flex items-start justify-between gap-4 group text-left hover:bg-zinc-50 dark:hover:bg-zinc-800/40 transition-colors cursor-pointer"
                       >
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-sm text-zinc-900 dark:text-white">{t.titre}</p>
@@ -319,7 +319,7 @@ export function ParametresModeles() {
                             <Trash2 size={14} />
                           )}
                         </button>
-                      </button>
+                      </div>
                     ))}
                   </div>
                 )}

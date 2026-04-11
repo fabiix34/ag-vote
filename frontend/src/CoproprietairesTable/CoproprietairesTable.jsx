@@ -166,32 +166,53 @@ export function CoproprietairesTable({
   };
 
   // ---- Handlers import Excel ----
+  const parseExcelDate = (raw) => {
+    if (!raw) return "";
+    const s = String(raw).trim();
+    // Already DD/MM/YYYY
+    if (/^\d{2}\/\d{2}\/\d{4}$/.test(s)) return s;
+    // Excel serial number (numeric string like "30078.000243")
+    if (/^\d+(\.\d+)?$/.test(s)) {
+      const serial = parseFloat(s);
+      const date = XLSX.SSF.parse_date_code(serial);
+      if (date) {
+        const d = String(date.d).padStart(2, "0");
+        const m = String(date.m).padStart(2, "0");
+        return `${d}/${m}/${date.y}`;
+      }
+    }
+    // MM/DD/YYYY → DD/MM/YYYY (Excel formatted with raw: false)
+    const mmddyyyy = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+    if (mmddyyyy) return `${mmddyyyy[2].padStart(2, "0")}/${mmddyyyy[1].padStart(2, "0")}/${mmddyyyy[3]}`;
+    return s;
+  };
+
   const handleFile = (e) => {
     const file = e.target.files[0];
     if (!file) return;
     const reader = new FileReader();
     reader.onload = (evt) => {
-      const wb = XLSX.read(evt.target.result, { type: "binary" });
+      const wb = XLSX.read(new Uint8Array(evt.target.result), { type: "array", cellDates: false });
       const ws = wb.Sheets[wb.SheetNames[0]];
-      const data = XLSX.utils.sheet_to_json(ws);
+      const data = XLSX.utils.sheet_to_json(ws, { raw: true });
       const normalized = data
         .map((row) => ({
           nom: row["Nom"] || row["nom"] || "",
           prenom: row["Prénom"] || row["prenom"] || "",
           email: row["Email"] || row["email"] || "",
-          date_naissance: String(row["DateNaissance"] || row["date_naissance"] || ""),
+          date_naissance: parseExcelDate(row["DateNaissance"] || row["date_naissance"]),
           tantiemes: parseInt(row["Tantièmes"] || row["tantiemes"] || 0),
         }))
         .filter((r) => r.email);
       setImportPreview(normalized);
     };
-    reader.readAsBinaryString(file);
+    reader.readAsArrayBuffer(file);
   };
 
   const handleImport = async () => {
     setImporting(true);
     const rows = importPreview.map((r) => ({ ...r, copropriete_id: coproprieteId }));
-    const { error } = await coproprietaireService.importCoproprietaires(rows);
+    const { error } = await coproprietaireService.import(rows);
     setImporting(false);
     if (!error) {
       setShowImport(false);
@@ -461,7 +482,7 @@ export function CoproprietairesTable({
                   <table className="w-full text-xs">
                     <thead className="bg-zinc-50 dark:bg-zinc-800 sticky top-0">
                       <tr>
-                        {["Nom", "Prénom", "Email", "Naissance", "Tantièmes"].map((h) => (
+                        {["Nom", "Prénom", "Email", "Date de naissance", "Tantièmes"].map((h) => (
                           <th key={h} className="px-3 py-2 text-left text-zinc-500 dark:text-zinc-400 font-medium">{h}</th>
                         ))}
                       </tr>

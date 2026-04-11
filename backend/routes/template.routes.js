@@ -27,10 +27,11 @@ router.get("/", async (req, res, next) => {
 router.post("/", async (req, res, next) => {
   try {
     const { titre, description, categorie } = req.body;
-    if (!titre || !categorie) {
-      return res.status(400).json({ error: "titre et categorie sont requis." });
+    console.log(req.body);
+    if (!titre || !categorie || !description) {
+      return res.status(400).json({ error: "titre, description et categorie sont requis." });
     }
-    const { data, error } = await templateService.create(titre, description, categorie);
+    const { data, error } = await templateService.create({ titre, description, categorie });
     if (error) return res.status(500).json({ error: error.message });
     res.status(201).json(data);
   } catch (err) {
@@ -43,9 +44,7 @@ router.patch("/:id", async (req, res, next) => {
     const { titre, description, categorie } = req.body;
     const { data, error } = await templateService.update(
       req.params.id,
-      titre,
-      description,
-      categorie
+      { titre, description, categorie }
     );
     if (error) return res.status(500).json({ error: error.message });
     res.json(data);
