@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development node --watch index.js",
-    "start": "NODE_ENV=production node index.js"
+    "deploy": "chmod +x deploy.sh && ./deploy.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",
