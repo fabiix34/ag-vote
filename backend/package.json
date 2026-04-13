@@ -4,7 +4,12 @@
   "type": "module",
   "scripts": {
     "dev": "NODE_ENV=development node --watch index.js",
-    "deploy": "chmod +x deploy.sh && ./deploy.sh"
+    "deploy": "chmod +x deploy.sh && ./deploy.sh",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "devDependencies": {
+    "vitest": "^2.1.9"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.100.0",
